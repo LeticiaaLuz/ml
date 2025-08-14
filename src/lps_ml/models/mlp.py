@@ -5,7 +5,7 @@ import functools
 import typing
 import torch
 
-import ml.models.base_model as lps_model
+import lps_ml.models.base_model as lps_model
 
 class MLP(lps_model.BaseModel):
 

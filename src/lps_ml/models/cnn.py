@@ -1,8 +1,8 @@
 import typing
 import torch
 
-import ml.models.base_model as lps_model
-import ml.models.mlp as lps_mlp
+import lps_ml.models.base_model as lps_model
+import lps_ml.models.mlp as lps_mlp
 
 class CNN(lps_model.BaseModel):
 
