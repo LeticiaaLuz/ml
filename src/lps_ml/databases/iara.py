@@ -157,7 +157,7 @@ class LabelFilter():
         return False
 
 class Target(Filter):
-    """ Abstract class to represent target on a classification task. """
+    """ Abstract class to convert element of dataframes to targets. """
 
     DEFAULT_TARGET_HEADER = 'Target'
     def __init__(self,
@@ -173,9 +173,17 @@ class Target(Filter):
     @abc.abstractmethod
     def apply(self, input_df: pd.DataFrame) -> pd.DataFrame:
         """
+        Apply the labelling in a dataframe.
+
+        Args:
+            input_df (pd.DataFrame): The input DataFrame to be classified.
+
+        Returns:
+            pd.DataFrame: A DataFrame with target columns
         """
 
     def grouped_column(self) -> str:
+        """ Function to define label header to grouped data. """
         return self.DEFAULT_TARGET_HEADER
 
 class LabelTarget(LabelFilter, Target):
@@ -197,14 +205,13 @@ class LabelTarget(LabelFilter, Target):
 
     def apply(self, input_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Filter the collection based on selected values present in a column.
+        Apply the labelling in a dataframe.
 
         Args:
-            input_df (pd.DataFrame): The input DataFrame to be filtered.
+            input_df (pd.DataFrame): The input DataFrame to be classified.
 
         Returns:
-            pd.DataFrame: A filtered DataFrame containing only the rows with values present in the
-                specified column.
+            pd.DataFrame: A DataFrame with target columns
 
         Notes:
             - The target values are assigned based on the unique values present in the 'self.column'
@@ -235,7 +242,7 @@ class LabelTarget(LabelFilter, Target):
         return False
 
 class CallbackTarget(Target):
-    """ Callback Target convert each element in collection to target. """
+    """ Class to implement target based on a callback function. """
 
     def __init__(self,
                  n_targets : int,
@@ -308,6 +315,7 @@ class CustomCollection:
         return df
 
     def to_compiled_df(self, df=None) -> pd.DataFrame:
+        """ Generate a compact dataframe based on grouped column. """
 
         df = self.to_df() if df is None else df
         if self.target.include_others:
@@ -315,7 +323,8 @@ class CustomCollection:
             df_others = df[df['Target'] == self.target.get_n_targets() - 1]
 
             df_label = df_label.groupby(self.target.grouped_column()).size().reset_index(name='Qty')
-            new_row = pd.DataFrame({self.target.grouped_column(): ['Others'], 'Qty': [df_others.shape[0]]})
+            new_row = pd.DataFrame({self.target.grouped_column(): ['Others'],
+                                    'Qty': [df_others.shape[0]]})
 
             df = pd.concat([df_label, new_row])
 
