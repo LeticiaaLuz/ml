@@ -3,12 +3,11 @@ Module containing a Convolutional Neural Network (CNN) based models.
 """
 import typing
 import torch
-import lightning as L
 
 import lps_ml.models.mlp as lps_mlp
 
 
-class CNN(L.LightningModule):
+class CNN(lps_mlp.MLP):
     """ CNN with MLP head, compatible with binary or multiclass classification. """
 
     def __init__(
@@ -33,24 +32,11 @@ class CNN(L.LightningModule):
         lr: float = 1e-3,
         loss_fn: typing.Optional[typing.Callable[[], torch.nn.Module]] = None,
     ):
-        super().__init__()
-        self.save_hyperparameters(ignore=[
-            "conv_activation", "conv_pooling", "batch_norm",
-            "classification_hidden_activation", "classification_output_activation", "loss_fn"
-        ])
-
         conv_activation = conv_activation or torch.nn.ReLU
         conv_pooling = conv_pooling or torch.nn.MaxPool2d
         conv_pooling_size = conv_pooling_size or [2, 2]
         batch_norm = batch_norm or torch.nn.BatchNorm2d
         classification_norm = classification_norm or torch.nn.BatchNorm1d
-
-        if loss_fn is None:
-            if n_targets == 1:
-                loss_fn = torch.nn.BCEWithLogitsLoss
-            else:
-                loss_fn = torch.nn.CrossEntropyLoss
-        self.loss_fn = loss_fn()
 
         classification_hidden_activation = classification_hidden_activation or conv_activation
         padding = padding or int((kernel_size - 1) / 2)
@@ -59,10 +45,6 @@ class CNN(L.LightningModule):
             raise ValueError(f"CNN expects as input an image in the format: \
                                     channel x width x height (current {input_shape})")
 
-        self.input_shape = input_shape
-        self.n_targets = n_targets
-        self.lr = lr
-        self.is_binary = n_targets == 1
 
         conv_layers = []
         conv_channels = [input_shape[0]] + conv_n_neurons
@@ -76,15 +58,13 @@ class CNN(L.LightningModule):
             conv_layers.append(conv_activation())
             if conv_pooling is not None:
                 conv_layers.append(conv_pooling(*conv_pooling_size))
-        self.conv_layers = torch.nn.Sequential(*conv_layers)
+
+        conv_layers = torch.nn.Sequential(*conv_layers)
 
         test_tensor = torch.rand([1] + list(input_shape), dtype=torch.float32)
-        device = next(self.parameters()).device
-        test_tensor = test_tensor.to(device)
-        self.conv_layers.to(device)
-        features = self.to_feature_space(test_tensor)
+        features = conv_layers(test_tensor)
 
-        self.mlp = lps_mlp.MLP(
+        super().__init__(
             input_shape=features.shape,
             hidden_channels=classification_n_neurons,
             norm_layer=classification_norm,
@@ -95,48 +75,19 @@ class CNN(L.LightningModule):
             loss_fn=loss_fn
         )
 
+        self.save_hyperparameters(ignore=[
+            "conv_activation", "conv_pooling", "batch_norm",
+            "classification_hidden_activation", "classification_output_activation", "loss_fn"
+        ])
+
+        self.conv_layers = torch.nn.Sequential(*conv_layers)
+
     def to_feature_space(self, x: torch.Tensor) -> torch.Tensor:
         """ Pass the input through the convolutional part of the network."""
         return self.conv_layers(x)
 
-    #pylint: disable=W0221
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.to_feature_space(x)
-        x = self.mlp(x)
-        return x
-
-    def _shared_step(self, batch: typing.Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
-        """Shared step for training and validation."""
-        x, y = batch
-        if self.is_binary:
-            y = y.float()
-        y_hat = self(x)
-        loss = self.loss_fn(y_hat, y)
-        return loss
-
-    def training_step(self,
-                batch: typing.Tuple[torch.Tensor, torch.Tensor],
-                _: int = 0) -> torch.Tensor:
-        """Executes a single training step."""
-        loss = self._shared_step(batch)
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        return loss
-
-    def validation_step(self,
-                batch: typing.Tuple[torch.Tensor, torch.Tensor],
-                _: int = 0) -> torch.Tensor:
-        """Executes a single validation step."""
-        loss = self._shared_step(batch)
-        self.log("val_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        return loss
-
-    def test_step(self,
-                batch: typing.Tuple[torch.Tensor, torch.Tensor],
-                _: int = 0) -> torch.Tensor:
-        """ Executes a single test step. """
-        return self._shared_step(batch)
-
-    def configure_optimizers(self) -> torch.optim.Optimizer:
-        """ Defines and returns the optimizer used during training. """
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        return optimizer
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """ Forward pass through the CNN. """
+        features = self.to_feature_space(inputs)
+        out = super().forward(features)
+        return out
