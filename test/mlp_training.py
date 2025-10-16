@@ -9,8 +9,8 @@ import lightning.pytorch.loggers as lightning_log
 import lightning.pytorch.callbacks as lightning_call
 
 import lps_ml.databases.mnist as lps_dm
-import lps_ml.models.mlp as lps_model
-
+import lps_ml.models.mlp as lps_mlp
+import lps_ml.models.cnn as lps_cnn
 import lps_ml.models.utils as lps_utils
 
 def _evaluate_accuracy(model: torch.nn.Module,
@@ -51,8 +51,11 @@ def _main():
                         help="Learning rate.")
     parser.add_argument("--binary", action="store_true",
                         help="Train binary classifier (even=0, odd=1) instead of 10-class MNIST.")
+    parser.add_argument("--model", type=str, choices=["mlp", "cnn"], default="mlp",
+                        help="Model type to train: 'mlp' or 'cnn'.")
     args = parser.parse_args()
 
+    torch.set_float32_matmul_precision('medium')
 
     dm = lps_dm.MNISTDM(data_dir=args.data_dir,
                         batch_size=args.batch_size,
@@ -61,24 +64,37 @@ def _main():
 
     n_targets = 1 if args.binary else 10
 
-    model = lps_model.MLP(
-        input_shape=(28, 28),
-        hidden_channels=[64],
-        n_targets=n_targets,
-        loss_fn=torch.nn.BCEWithLogitsLoss if args.binary else torch.nn.CrossEntropyLoss,
-        lr=args.lr,
-    )
+    if args.model == "mlp":
+        model = lps_mlp.MLP(
+            input_shape=(28, 28),
+            hidden_channels=[64],
+            n_targets=n_targets,
+            loss_fn=torch.nn.BCEWithLogitsLoss if args.binary else torch.nn.CrossEntropyLoss,
+            lr=args.lr,
+        )
+    elif args.model == "cnn":
+        model = lps_cnn.CNN(
+            input_shape=(1, 28, 28),
+            conv_n_neurons=[32, 64],
+            n_targets=n_targets,
+            loss_fn=torch.nn.BCEWithLogitsLoss if args.binary else torch.nn.CrossEntropyLoss,
+            lr=args.lr,
+        )
+    else:
+        raise ValueError("Suported modules are 'mlp' or 'cnn'")
 
     checkpoint_cb = lightning_call.ModelCheckpoint(
         monitor="val_loss",
         save_top_k=1,
         mode="min",
-        filename=f"mnist-mlp-{'binary' if args.binary else 'multi'}-{{epoch:02d}}-{{val_loss:.3f}}",
+        filename=f"mnist-{args.model}-{'binary' if args.binary else 'multi'}-{{epoch:02d}}-{{val_loss:.3f}}",
     )
     early_stop_cb = lightning_call.EarlyStopping(monitor="val_loss", patience=4, mode="min")
 
-    logger = lightning_log.TensorBoardLogger("logs",
-                    name=f"mnist_mlp_{'binary' if args.binary else 'multi'}")
+    logger = lightning_log.TensorBoardLogger(
+        "logs",
+        name=f"mnist_{args.model}_{'binary' if args.binary else 'multi'}"
+    )
 
     trainer = lightning.Trainer(
         max_epochs=args.max_epochs,
@@ -96,7 +112,7 @@ def _main():
     test_acc  = _evaluate_accuracy(model, dm.test_dataloader())
 
     print(f"{'='*60}")
-    print(f"Mode: {'Binary (Even/Odd)' if args.binary else 'Multiclass (0–9)'}")
+    print(f"Model: {args.model.upper()} | Mode: {'Binary (Even/Odd)' if args.binary else 'Multiclass (0–9)'}")
     print(f"Train accuracy:      {train_acc:.4f}")
     print(f"Validation accuracy: {val_acc:.4f}")
     print(f"Test accuracy:       {test_acc:.4f}")

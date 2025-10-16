@@ -34,7 +34,12 @@ class MLP(lightning.LightningModule):
         norm_layer = norm_layer or torch.nn.BatchNorm1d
         activation_layer = activation_layer or torch.nn.ReLU
         activation_output_layer = activation_output_layer or torch.nn.Sigmoid
-        loss_fn = loss_fn or torch.nn.MSELoss
+
+        if loss_fn is None:
+            if n_targets == 1:
+                loss_fn = torch.nn.BCEWithLogitsLoss
+            else:
+                loss_fn = torch.nn.CrossEntropyLoss
 
         if isinstance(input_shape, int):
             input_dim = input_shape
