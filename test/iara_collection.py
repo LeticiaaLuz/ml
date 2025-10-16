@@ -8,7 +8,7 @@ import pandas as pd
 import lps_ml.databases.iara as lps_iara
 
 
-def main(show_sample_dataset = False):
+def main():
     """Main function for the dataset info tables."""
 
     os_ship_merged = []
@@ -20,7 +20,7 @@ def main(show_sample_dataset = False):
     ]
 
     for sub in collection_list:
-        df = sub.to_df(only_sample=show_sample_dataset)
+        df = sub.to_df()
         part = df.groupby(['SHIPTYPE','DETAILED TYPE']).size().reset_index(name=str(sub))
 
         if not isinstance(os_ship_merged, pd.DataFrame):
@@ -64,7 +64,7 @@ def main(show_sample_dataset = False):
     print(os_ship_type)
 
 
-    os_bg = lps_iara.Collection.E.to_df(only_sample=show_sample_dataset)
+    os_bg = lps_iara.Collection.E.to_df()
 
     print('\n------------------------- os_bg -----------------------------------------')
     print(os_bg)
@@ -76,7 +76,7 @@ def main(show_sample_dataset = False):
         lps_iara.Collection.G,
     ]
     for sub in collection_list:
-        df = sub.to_df(only_sample=show_sample_dataset)
+        df = sub.to_df()
         part = df.groupby(['SHIPTYPE','DETAILED TYPE']).size().reset_index(name=str(sub))
 
         if not isinstance(glider_ship_merged, pd.DataFrame):

@@ -44,11 +44,11 @@ class Collection(enum.Enum):
         """Return a string representation of the collection."""
         return str(self.name).rsplit(".", maxsplit=1)[-1]
 
-    def _get_info_filename(self, only_sample: bool = False) -> str:
+    def _get_info_filename(self) -> str:
         """Return the internal filename for collection information."""
         return os.path.join(os.path.dirname(__file__),
                             "dataset_info",
-                            "iara.csv" if not only_sample else "iara_sample.csv")
+                            "iara.csv")
 
     def get_selection_str(self) -> str:
         """Get string to filter the 'Dataset' column."""
@@ -96,18 +96,12 @@ class Collection(enum.Enum):
         ]
         return labels[self.value]
 
-    def to_df(self, only_sample: bool = False) -> pd.DataFrame:
+    def to_df(self) -> pd.DataFrame:
         """Get information about the collection as a DataFrame.
-
-        Args:
-            only_sample (bool, optional): If True, provides information about the sampled
-                collection. If False, includes information about the complete collection.
-                Defaults to False.
-
         Returns:
             pd.DataFrame: A DataFrame containing detailed information about the collection.
         """
-        df = pd.read_csv(self._get_info_filename(only_sample=only_sample), na_values=[" - "])
+        df = pd.read_csv(self._get_info_filename(), na_values=[" - "])
         return df.loc[df['Dataset'].str.contains(self.get_selection_str())]
 
 class Filter():
@@ -277,22 +271,18 @@ class CustomCollection:
     def __init__(self,
                  collection: Collection,
                  target: Target,
-                 filters: typing.Union[typing.List[Filter], Filter] = None,
-                 only_sample: bool = False):
+                 filters: typing.Union[typing.List[Filter], Filter] = None):
         """
         Parameters:
         - collection (Collection): Collection to be used.
         - target (Target): Target selection for training.
         - filters (List[Filter], optional): List of filters to be applied.
             Default is use all collection.
-        - only_sample (bool, optional): Use only data available in sample collection.
-            Default is False.
         """
         self.collection = collection
         self.target = target
         self.filters = [] if filters is None else \
                 (filters if isinstance(filters, list) else [filters])
-        self.only_sample = only_sample
 
     def __str__(self) -> str:
         """Return a string representation of the CustomCollection object."""
@@ -307,7 +297,7 @@ class CustomCollection:
             pd.DataFrame: DataFrame containing the collection information after applying filters
                 and target mapping.
         """
-        df = self.collection.to_df(only_sample=self.only_sample)
+        df = self.collection.to_df()
         for filt in self.filters:
             df = filt.apply(df)
 
@@ -337,6 +327,5 @@ class CustomCollection:
         if isinstance(other, CustomCollection):
             return (self.collection == other.collection and
                     self.target == other.target and
-                    self.filters == other.filters and
-                    self.only_sample == other.only_sample)
+                    self.filters == other.filters)
         return False

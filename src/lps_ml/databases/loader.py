@@ -6,13 +6,13 @@ This module provides functionality to read .wav files in a dataset.
 import os
 import typing
 import abc
+import json
+import hashlib
 
 import numpy as np
 import scipy.io.wavfile as scipy_wav
 import torch
 import h5py
-import json
-import hashlib
 import tqdm
 
 import lps_utils.quantities as lps_qty
@@ -25,6 +25,7 @@ def _default_id(filename: str) -> int:
 
 
 class Hashable:
+    """ Class for serializing and creating child hashables. """
 
     def __hash__(self):
         cfg = {
@@ -100,7 +101,6 @@ class AudioFileLoader(Hashable):
             data = data[:,0]
 
         return lps_qty.Frequency.hz(fs), data
-
 
     @staticmethod
     def iara(data_base_dir: str) -> 'AudioFileLoader':

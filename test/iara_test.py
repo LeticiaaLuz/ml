@@ -11,6 +11,7 @@ import lps_ml.databases.iara as lps_iara
 
 
 class WindowedDecimateProcessor(lps_loader.AudioFileProcessor):
+    """ Example of processor. """
 
     def __init__(self,
                  fs: lps_qty.Frequency,
@@ -40,7 +41,7 @@ def main():
     df = lps_iara.Collection.A.to_df()[:3]
     file_ids = df["ID"].tolist()
 
-    base_dir = "/home/fabio/Data/IARA"
+    base_dir = "/data/IARA"
     file_loader = lps_loader.AudioFileLoader.iara(base_dir)
 
     processor = WindowedDecimateProcessor(
