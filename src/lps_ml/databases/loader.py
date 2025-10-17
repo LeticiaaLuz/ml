@@ -4,18 +4,24 @@ Audio dataloader Module
 This module provides functionality to read .wav files in a dataset.
 """
 import os
-import typing
-import abc
 import json
-import hashlib
+import typing
+import multiprocessing
 
-import numpy as np
-import scipy.io.wavfile as scipy_wav
-import torch
-import h5py
 import tqdm
+import numpy as np
+import pandas as pd
+
+import scipy.io.wavfile as scipy_wav
+
+import torch
+import torch.utils.data as torch_data
+import lightning
 
 import lps_utils.quantities as lps_qty
+import lps_ml.databases.cv as lps_cv
+import lps_ml.utils as lps_utils
+import lps_ml.processors as lps_proc
 
 def _get_iara_id(filename:str) -> int:
     return int(filename.rsplit('-',maxsplit=1)[-1])
@@ -24,37 +30,7 @@ def _default_id(filename: str) -> int:
     return int(filename)
 
 
-class Hashable:
-    """ Class for serializing and creating child hashables. """
-
-    def __hash__(self):
-        cfg = {
-            "class": self.__class__.__name__,
-            "module": self.__class__.__module__,
-            "params": self._get_params()
-        }
-        cfg_str = json.dumps(cfg, sort_keys=True, default=str)
-        return int(hashlib.sha256(cfg_str.encode()).hexdigest(), 16)
-
-    def _get_params(self):
-        return self._serialize(self.__dict__)
-
-    def _serialize(self, obj):
-        if isinstance(obj, (str, int, float, bool)) or obj is None:
-            return obj
-        elif isinstance(obj, (list, tuple)):
-            return [self._serialize(x) for x in obj]
-        elif isinstance(obj, dict):
-            return {k: self._serialize(v) for k, v in obj.items()}
-        elif isinstance(obj, Hashable):
-            return hash(obj)
-        else:
-            return str(obj)
-
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and hash(self) == hash(other)
-
-class AudioFileLoader(Hashable):
+class AudioFileLoader(lps_utils.Hashable):
     """ Class to find and load audio files """
 
     def __init__(self,
@@ -107,131 +83,147 @@ class AudioFileLoader(Hashable):
         """ Get AudioLoader for IARA dataset. """
         return AudioFileLoader(data_base_dir=data_base_dir, extract_id=_get_iara_id)
 
-class AudioFileProcessor(Hashable):
-    """ Abstract class to process and audio file and get training window. """
+class ProcessedDataset(torch_data.Dataset):
+    """ Simple dataset for processed data in .npy format """
 
-    @abc.abstractmethod
-    def process(self, fs: lps_qty.Frequency, data: np.array) -> typing.List[np.array]:
-        """
-        Process an audio into training windows.
+    def __init__(self, dataframe: pd.DataFrame, processed_dir: str, transform=None):
+        self.df = dataframe.reset_index(drop=True)
+        self.processed_dir = processed_dir
+        self.transform = transform
 
-        Args:
-            fs (lps_qty.Frequency):  Sampling frequency of the input signal.
-            data (np.array): Audio as a 1D tensor.
+    def __len__(self):
+        return len(self.df)
 
-        Returns:
-            windows (list of np.array):  A list of processed audio windows
-        """
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        fragment_path = os.path.join(self.processed_dir, f"{row['id_fragment']}.npy")
+        fragment = np.load(fragment_path)
+        if self.transform:
+            fragment = self.transform(fragment)
+        return torch.from_numpy(fragment).float(), row['target']
 
-
-class AudioDataLoader(Hashable):
-    """ Class to process and manage file of processed data. """
+class AudioDataModule(lightning.LightningDataModule, lps_utils.Hashable):
+    """ Basic DataModule for process and load audio datasets. """
 
     def __init__(self,
-                 file_dir: str,
                  file_loader: AudioFileLoader,
-                 file_processor: AudioFileProcessor,
-                 file_ids: typing.List[int]):
-
-        self.file_dir = file_dir
+                 file_processor: lps_proc.AudioFileProcessor,
+                 file_ids: typing.List[int],
+                 targets: typing.List[int],
+                 processed_dir: str,
+                 batch_size: int = 32,
+                 num_workers: int = None,
+                 cv: lps_cv.CrossValidator = None,
+                 transform=None):
+        super().__init__()
         self.file_loader = file_loader
         self.file_processor = file_processor
         self.file_ids = file_ids
+        self.targets = targets
+        self.batch_size = batch_size
+        self.num_workers = num_workers or max(1, multiprocessing.cpu_count() // 2)
+        self.cv = cv or lps_cv.HoldOutCV()
+        self.transform = transform
 
-        self.file_name = os.path.join(file_dir, self._get_file_name())
+        self.dataframe = None
+        self.folds = None
+        self.train_df = None
+        self.val_df = None
+        self.test_df = None
 
-        if not os.path.exists(self.file_name):
-            self._process_and_save()
+        self.processed_dir = os.path.join(processed_dir, f"{hash(self)}")
+        self.csv_file = os.path.join(self.processed_dir, "description.csv")
 
-        with h5py.File(self.file_name, "r") as f:
-            self.processed_to_file = f["processed_to_file"][:]
-            self.file_to_processed = {
-                int(fid): f["file_to_processed"][str(fid)][:]
-                    for fid in f["file_to_processed"].keys()
-            }
+    def _get_params(self):
+        return {
+            "file_loader": self.file_loader.__get_hash_base__(),
+            "file_processor": self.file_processor.__get_hash_base__(),
+            "file_ids": self.file_ids,
+            "targets": self.targets,
+        }
 
+    def prepare_data(self):
 
-    def _get_file_name(self) -> str:
-        return f"{hash(self)}.h5"
+        os.makedirs(self.processed_dir, exist_ok=True)
 
-    def _process_and_save(self):
+        if os.path.exists(self.csv_file):
+            print(f"[prepare_data] CSV ready: {self.csv_file}, skipping processing chain.")
+            return
 
-        os.makedirs(self.file_dir, exist_ok=True)
+        records = []
+        fragment_idx = 0
 
-        with h5py.File(self.file_name, "w") as f:
-            audio_dset = None
-            processed_to_file = None
-            group = f.create_group("file_to_processed")
-            current_idx = 0
-            max_windows_alloc = None
+        for file_idx, file_id in enumerate(tqdm.tqdm(
+                                    self.file_ids, desc="Processando arquivos", ncols=120)):
+            fs, data = self.file_loader.load(file_id)
+            fragments = self.file_processor.process(fs, data)
 
-            for fid in tqdm.tqdm(self.file_ids, desc="Processing Files", leave=False, ncols=120):
+            for frag in fragments:
+                frag_path = os.path.join(self.processed_dir, f"{fragment_idx}.npy")
+                np.save(frag_path, frag)
+                records.append({
+                    "id_fragment": fragment_idx,
+                    "file_id": file_id,
+                    "target": self.targets[file_idx]
+                })
+                fragment_idx += 1
 
-                fs, data = self.file_loader.load(fid)
-                windows = self.file_processor.process(fs, data)
+        df = pd.DataFrame(records)
+        df.to_csv(self.csv_file, index=False)
+        print(f"[prepare_data] Dataset processed with {len(df)} fragments at {self.csv_file}.")
 
-                n_windows = len(windows)
-                window_shape = windows[0].shape
+        description = self.__get_hash_base__()
+        desc_file = os.path.join(self.processed_dir, "description.json")
+        with open(desc_file, "w", encoding="utf-8") as f:
+            json.dump(description, f, indent=4, ensure_ascii=False)
+        print(f"[prepare_data] Description saved to {desc_file}")
 
-                if audio_dset is None:
-
-                    max_windows_alloc = n_windows * 2 * len(self.file_ids)
-                    audio_dset = f.create_dataset(
-                        "audio",
-                        shape=(max_windows_alloc, *window_shape),
-                        maxshape=(None, *window_shape),
-                        dtype="float32",
-                        compression=None,
-                        chunks=(1, *window_shape)
-                    )
-                    processed_to_file = f.create_dataset(
-                        "processed_to_file",
-                        shape=(max_windows_alloc,),
-                        maxshape=(None,),
-                        dtype="int32"
-                    )
-
-                if current_idx + n_windows > audio_dset.shape[0]:
-                    new_size = max(current_idx + n_windows, audio_dset.shape[0] * 2)
-                    audio_dset.resize((new_size, *window_shape))
-                    processed_to_file.resize((new_size,))
-
-                for j, window in enumerate(windows):
-                    audio_dset[current_idx + j, ...] = window
-                    processed_to_file[current_idx + j] = fid
-
-                group.create_dataset(str(fid),
-                                     data=list(range(current_idx, current_idx + n_windows)))
-
-                current_idx += n_windows
-
-            audio_dset.resize((current_idx, *window_shape))
-            processed_to_file.resize((current_idx,))
-
-    def __len__(self):
-        return len(self.processed_to_file)
-
-    def __getitem__(self, idx):
-        return self.load(idx)
-
-    def load(self, processed_ids: typing.Union[int, typing.List[int]]):
+    def setup(self, stage=None):
         """
-        Loads one or more windows from processed_ids
+        Loads the metadata CSV and generates cross-validation folds.
         """
-        if isinstance(processed_ids, int):
-            processed_ids = [processed_ids]
+        self.dataframe = pd.read_csv(self.csv_file)
 
-        with h5py.File(self.file_name, "r") as f:
-            data = f["audio"][processed_ids, ...]
+        self.folds = self.cv.apply(self.file_ids, self.targets)
+        self.set_fold(0)
 
-        return torch.from_numpy(data)
-
-    def map_file_ids_to_processed_ids(self, file_ids: typing.List[int]) -> typing.List[int]:
+    def set_fold(self, fold_idx: int):
         """
-        Returns all processed_ids associated with a list of file_ids
+        Sets the active fold for training/validation/test split.
+
+        Args:
+            fold_idx: Index of the fold to activate.
         """
-        proc_ids = []
-        for fid in file_ids:
-            if fid in self.file_to_processed:
-                proc_ids.extend(self.file_to_processed[fid])
-        return proc_ids
+        if self.folds is None:
+            raise RuntimeError("Folds not initialized. Call setup() first.")
+
+        if not 0 <= fold_idx < len(self.folds):
+            raise ValueError(f"Invalid fold index {fold_idx} (max {len(self.folds)-1}).")
+
+        fold_map = self.folds[fold_idx]
+
+        df = self.dataframe.copy()
+        df["group"] = df["file_id"].map(fold_map)
+
+        self.train_df = df[df["group"] == lps_cv.FoldRole.TRAIN]
+        self.val_df = df[df["group"] == lps_cv.FoldRole.VALIDATION]
+        self.test_df = df[df["group"] == lps_cv.FoldRole.TEST]
+
+    def train_dataloader(self):
+        return torch_data.DataLoader(
+                ProcessedDataset(self.train_df, self.processed_dir, self.transform),
+                batch_size=self.batch_size,
+                shuffle=True,
+                num_workers=self.num_workers)
+
+    def val_dataloader(self):
+        return torch_data.DataLoader(
+                ProcessedDataset(self.val_df, self.processed_dir, self.transform),
+                batch_size=self.batch_size,
+                num_workers=self.num_workers)
+
+    def test_dataloader(self):
+        return torch_data.DataLoader(
+                ProcessedDataset(self.test_df, self.processed_dir, self.transform),
+                batch_size=self.batch_size,
+                num_workers=self.num_workers)

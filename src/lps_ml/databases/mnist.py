@@ -17,8 +17,7 @@ class MNISTDM(lightning.LightningDataModule):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
-        self.num_workers = num_workers if num_workers is not None else \
-                                            max(1, multiprocessing.cpu_count() // 2)
+        self.num_workers = num_workers or max(1, multiprocessing.cpu_count() // 2)
         self.binary = binary
 
         self.mnist_test = None

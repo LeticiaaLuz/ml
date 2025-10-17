@@ -1,7 +1,4 @@
-"""
-Train an MLP on the MNIST dataset using PyTorch Lightning.
-
-tensorboard --logdir logs --host 0.0.0.0 --port 7088
+"""Simple trainer in 4 classes dataset
 """
 import argparse
 
@@ -12,10 +9,13 @@ import lightning
 import lightning.pytorch.loggers as lightning_log
 import lightning.pytorch.callbacks as lightning_call
 
-import lps_ml.databases.mnist as lps_dm
+import lps_utils.quantities as lps_qty
+
 import lps_ml.models.mlp as lps_mlp
-import lps_ml.models.cnn as lps_cnn
 import lps_ml.utils as lps_utils
+import lps_ml.databases.cv as lps_cv
+import lps_ml.processors as lps_proc
+import lps_ml.databases.four_classes as lps_4classes
 
 def _evaluate_accuracy(model: torch.nn.Module,
                       dataloader: torch_data.DataLoader):
@@ -53,51 +53,44 @@ def _main():
                         help="Maximum number of training epochs.")
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="Learning rate.")
-    parser.add_argument("--binary", action="store_true",
-                        help="Train binary classifier (even=0, odd=1) instead of 10-class MNIST.")
-    parser.add_argument("--model", type=str, choices=["mlp", "cnn"], default="mlp",
-                        help="Model type to train: 'mlp' or 'cnn'.")
+    # parser.add_argument("--model", type=str, choices=["mlp", "cnn"], default="mlp",
+    #                     help="Model type to train: 'mlp' or 'cnn'.")
     args = parser.parse_args()
 
     torch.set_float32_matmul_precision('medium')
 
-    dm = lps_dm.MNISTDM(data_dir=args.data_dir,
-                        batch_size=args.batch_size,
-                        binary=args.binary)
-    dm.prepare_data = lambda: None
+    fs_out=lps_qty.Frequency.khz(16)
+    duration=lps_qty.Time.s(1)
+    overlap=lps_qty.Time.s(0)
 
-    n_targets = 1 if args.binary else 10
+    dm = lps_4classes.FourClasses(
+            file_processor=lps_proc.WindowingResampler(fs_out=fs_out,
+                                                        duration=duration,
+                                                        overlap=overlap),
+            cv = lps_cv.FiveByTwo(),
+            batch_size=8)
 
-    if args.model == "mlp":
-        model = lps_mlp.MLP(
-            input_shape=(28, 28),
-            hidden_channels=[64],
-            n_targets=n_targets,
-            loss_fn=torch.nn.BCEWithLogitsLoss if args.binary else torch.nn.CrossEntropyLoss,
-            lr=args.lr,
-        )
-    elif args.model == "cnn":
-        model = lps_cnn.CNN(
-            input_shape=(1, 28, 28),
-            conv_n_neurons=[32, 64],
-            n_targets=n_targets,
-            loss_fn=torch.nn.BCEWithLogitsLoss if args.binary else torch.nn.CrossEntropyLoss,
-            lr=args.lr,
-        )
-    else:
-        raise ValueError("Suported modules are 'mlp' or 'cnn'")
+    n_targets = 4
+
+    model = lps_mlp.MLP(
+        input_shape=(1, int(fs_out*duration)),
+        hidden_channels=[64, 16],
+        n_targets=n_targets,
+        loss_fn=torch.nn.CrossEntropyLoss,
+        lr=args.lr,
+    )
 
     checkpoint_cb = lightning_call.ModelCheckpoint(
         monitor="val_loss",
         save_top_k=1,
         mode="min",
-        filename=f"mnist-{args.model}-{'binary' if args.binary else 'multi'}-{{epoch:02d}}-{{val_loss:.3f}}",
+        filename=f"mnist-{{epoch:02d}}-{{val_loss:.3f}}",
     )
     early_stop_cb = lightning_call.EarlyStopping(monitor="val_loss", patience=4, mode="min")
 
     logger = lightning_log.TensorBoardLogger(
         "logs",
-        name=f"mnist_{args.model}_{'binary' if args.binary else 'multi'}"
+        name="mnist"
     )
 
     trainer = lightning.Trainer(
@@ -113,13 +106,12 @@ def _main():
 
     train_acc = _evaluate_accuracy(model, dm.train_dataloader())
     val_acc   = _evaluate_accuracy(model, dm.val_dataloader())
-    test_acc  = _evaluate_accuracy(model, dm.test_dataloader())
+    # test_acc  = _evaluate_accuracy(model, dm.test_dataloader())
 
     print(f"{'='*60}")
-    print(f"Model: {args.model.upper()} | Mode: {'Binary (Even/Odd)' if args.binary else 'Multiclass (0–9)'}")
     print(f"Train accuracy:      {train_acc:.4f}")
     print(f"Validation accuracy: {val_acc:.4f}")
-    print(f"Test accuracy:       {test_acc:.4f}")
+    # print(f"Test accuracy:       {test_acc:.4f}")
     print(f"{'='*60}")
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ import os
 import random
 import datetime
 import shutil
+import hashlib
+import json
 
 import numpy as np
 
@@ -62,3 +64,37 @@ def backup_folder(base_dir, time_str_format = "%Y%m%d-%H%M%S"):
             except ValueError:
                 pass
         shutil.move(item_path, backup_dir)
+
+
+class Hashable:
+    """ Class for serializing and creating child hashables. """
+
+    def __hash__(self):
+        cfg = self.__get_hash_base__()
+        cfg_str = json.dumps(cfg, sort_keys=True, default=str)
+        return int(hashlib.sha256(cfg_str.encode()).hexdigest(), 16)
+
+    def __get_hash_base__(self):
+        return {
+            "class": self.__class__.__name__,
+            "module": self.__class__.__module__,
+            "params": self._get_params()
+        }
+
+    def _get_params(self):
+        return self._serialize(self.__dict__)
+
+    def _serialize(self, obj):
+        if isinstance(obj, (str, int, float, bool)) or obj is None:
+            return obj
+        elif isinstance(obj, (list, tuple)):
+            return [self._serialize(x) for x in obj]
+        elif isinstance(obj, dict):
+            return {k: self._serialize(v) for k, v in obj.items()}
+        elif isinstance(obj, Hashable):
+            return hash(obj)
+        else:
+            return str(obj)
+
+    def __eq__(self, other):
+        return isinstance(other, self.__class__) and hash(self) == hash(other)
