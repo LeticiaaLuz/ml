@@ -53,8 +53,6 @@ def _main():
                         help="Maximum number of training epochs.")
     parser.add_argument("--lr", type=float, default=1e-3,
                         help="Learning rate.")
-    # parser.add_argument("--model", type=str, choices=["mlp", "cnn"], default="mlp",
-    #                     help="Model type to train: 'mlp' or 'cnn'.")
     args = parser.parse_args()
 
     torch.set_float32_matmul_precision('medium')
@@ -70,12 +68,10 @@ def _main():
             cv = lps_cv.FiveByTwo(),
             batch_size=8)
 
-    n_targets = 4
-
     model = lps_mlp.MLP(
-        input_shape=(1, int(fs_out*duration)),
+        input_shape=dm.get_sample_shape(),
         hidden_channels=[64, 16],
-        n_targets=n_targets,
+        n_targets=dm.get_n_targets(),
         loss_fn=torch.nn.CrossEntropyLoss,
         lr=args.lr,
     )

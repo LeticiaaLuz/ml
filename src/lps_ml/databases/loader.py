@@ -22,6 +22,7 @@ import lps_utils.quantities as lps_qty
 import lps_ml.databases.cv as lps_cv
 import lps_ml.utils as lps_utils
 import lps_ml.processors as lps_proc
+import lps_ml.databases.datamodule as lps_dm
 
 def _get_iara_id(filename:str) -> int:
     return int(filename.rsplit('-',maxsplit=1)[-1])
@@ -102,7 +103,7 @@ class ProcessedDataset(torch_data.Dataset):
             fragment = self.transform(fragment)
         return torch.from_numpy(fragment).float(), row['target']
 
-class AudioDataModule(lightning.LightningDataModule, lps_utils.Hashable):
+class AudioDataModule(lps_dm.DataModule, lps_utils.Hashable):
     """ Basic DataModule for process and load audio datasets. """
 
     def __init__(self,
@@ -227,3 +228,6 @@ class AudioDataModule(lightning.LightningDataModule, lps_utils.Hashable):
                 ProcessedDataset(self.test_df, self.processed_dir, self.transform),
                 batch_size=self.batch_size,
                 num_workers=self.num_workers)
+
+    def get_n_targets(self) -> int:
+        return len(set(self.targets))

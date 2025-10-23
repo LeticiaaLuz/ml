@@ -66,21 +66,19 @@ def _main():
                         binary=args.binary)
     dm.prepare_data = lambda: None
 
-    n_targets = 1 if args.binary else 10
-
     if args.model == "mlp":
         model = lps_mlp.MLP(
-            input_shape=(28, 28),
+            input_shape=dm.get_sample_shape(),
             hidden_channels=[64],
-            n_targets=n_targets,
+            n_targets=dm.get_n_targets(),
             loss_fn=torch.nn.BCEWithLogitsLoss if args.binary else torch.nn.CrossEntropyLoss,
             lr=args.lr,
         )
     elif args.model == "cnn":
         model = lps_cnn.CNN(
-            input_shape=(1, 28, 28),
+            input_shape=dm.get_sample_shape(),
             conv_n_neurons=[32, 64],
-            n_targets=n_targets,
+            n_targets=dm.get_n_targets(),
             loss_fn=torch.nn.BCEWithLogitsLoss if args.binary else torch.nn.CrossEntropyLoss,
             lr=args.lr,
         )

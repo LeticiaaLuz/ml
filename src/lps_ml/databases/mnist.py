@@ -7,9 +7,9 @@ import torch.utils.data as torch_data
 import torchvision.datasets as torch_set
 import torchvision.transforms as torch_trf
 
-import lightning
+import lps_ml.databases.datamodule as lps_dm
 
-class MNISTDM(lightning.LightningDataModule):
+class MNISTDM(lps_dm.DataModule):
     """ Simple MNIST DataModule. """
 
     def __init__(self, data_dir: str, batch_size: int = 32,
@@ -24,6 +24,9 @@ class MNISTDM(lightning.LightningDataModule):
         self.mnist_predict = None
         self.mnist_train = None
         self.mnist_val = None
+
+    def get_n_targets(self) -> int:
+        return 1 if self.binary else 10
 
     def setup(self, stage: str):
 
