@@ -5,7 +5,7 @@ from .cv import CrossValidator
 from .datamodule import BaseDataModule, AudioDataModule
 from .hashable import Hashable
 from .loader import AudioFileLoader
-from .processor import AudioProcessor
+from .processor import AudioProcessor, AudioPipeline
 
 __all__ = [
     "CrossValidator",
@@ -13,5 +13,6 @@ __all__ = [
     "AudioDataModule",
     "Hashable",
     "AudioFileLoader",
-    "AudioProcessor"
+    "AudioProcessor",
+    "AudioPipeline"
 ]

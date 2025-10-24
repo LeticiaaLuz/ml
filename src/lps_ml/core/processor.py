@@ -24,3 +24,13 @@ class AudioProcessor(ml_hash.Hashable):
         Returns:
             window_list (list of np.array):  A list of processed windows
         """
+
+class AudioPipeline(ml_hash.Hashable):
+    """ Abstract class to process audios and get processed audios. """
+
+    @abc.abstractmethod
+    def process(self, fs: lps_qty.Frequency, data: np.array) \
+            -> typing.Tuple[lps_qty.Frequency, np.array]:
+        """
+        Process an audio into processed audios.
+        """

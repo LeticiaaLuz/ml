@@ -15,6 +15,7 @@ import lightning.pytorch.callbacks as lightning_call
 import lps_ml.datasets as ml_db
 import lps_ml.model as ml_model
 import lps_ml.utils.device as ml_device
+import lps_ml.utils.general as ml_utils
 
 def _evaluate_accuracy(model: torch.nn.Module,
                       dataloader: torch_data.DataLoader):

@@ -17,7 +17,6 @@ import lps_ml.model as ml_model
 import lps_ml.core.cv as ml_cv
 import lps_ml.audio_processors as ml_procs
 import lps_ml.datasets as ml_db
-import lps_ml.datasets.selection as ml_sel
 import lps_ml.utils.general as ml_utils
 import lps_ml.datasets.iara as ml_iara
 
@@ -68,9 +67,9 @@ def _main():
     overlap=lps_qty.Time.s(0)
 
     dm = ml_db.IARA(
-            file_processor=ml_procs.SlidingWindowResampler(fs_out=fs_out,
-                                                        duration=duration,
-                                                        overlap=overlap),
+            file_processor=ml_procs.TimeProcessor(fs_out=fs_out,
+                                                  duration=duration,
+                                                  overlap=overlap),
             cv = ml_cv.FiveByTwo(),
             data_collection = ml_iara.DC.OS,
             batch_size=16)

@@ -65,13 +65,13 @@ def _main():
     overlap=lps_qty.Time.s(0)
 
     dm = ml_db.FourClasses(
-            file_processor=ml_procs.SlidingWindowResampler(fs_out=fs_out,
-                                                        duration=duration,
-                                                        overlap=overlap),
+            file_processor=ml_procs.TimeProcessor(fs_out=fs_out,
+                                                  duration=duration,
+                                                  overlap=overlap),
             cv = ml_cv.FiveByTwo(),
             batch_size=16,
             selection = ml_sel.Selection(
-                                ml_sel.LabelTarget(column="Class", values= ["B", "D"]))
+                                ml_sel.LabelTarget(column="Class", values= ["B", "C"]))
         )
 
     print(ml_utils.format_header(60,"Dataset description"))
