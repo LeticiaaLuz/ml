@@ -61,6 +61,7 @@ def _main():
     args = parser.parse_args()
 
     torch.set_float32_matmul_precision('medium')
+    ml_utils.set_seed()
 
     fs_out=lps_qty.Frequency.khz(16)
     duration=lps_qty.Time.s(1)

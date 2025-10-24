@@ -59,6 +59,7 @@ def _main():
     args = parser.parse_args()
 
     torch.set_float32_matmul_precision('medium')
+    ml_utils.set_seed()
 
     dm = ml_db.MNIST(data_dir=args.data_dir,
                      batch_size=args.batch_size,

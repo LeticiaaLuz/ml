@@ -58,6 +58,7 @@ def _main():
     args = parser.parse_args()
 
     torch.set_float32_matmul_precision('medium')
+    ml_utils.set_seed()
 
     fs_out=lps_qty.Frequency.khz(16)
     duration=lps_qty.Time.s(1)
@@ -70,7 +71,7 @@ def _main():
             cv = ml_cv.FiveByTwo(),
             batch_size=16,
             selection = ml_sel.Selection(
-                                ml_sel.LabelTarget(column="Class", values= ["B", "C"]))
+                                ml_sel.LabelTarget(column="Class", values= ["B", "D"]))
         )
 
     print(ml_utils.format_header(60,"Dataset description"))

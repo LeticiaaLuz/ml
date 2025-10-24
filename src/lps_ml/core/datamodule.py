@@ -109,51 +109,72 @@ class AudioDataModule(BaseDataModule, ml_hash.Hashable):
         return {
             "file_loader": self.file_loader.__get_hash_base__(),
             "file_processor": self.file_processor.__get_hash_base__(),
-            "file_ids": self.file_ids,
-            "targets": self.targets,
         }
 
     def prepare_data(self):
 
         os.makedirs(self.processed_dir, exist_ok=True)
 
-        if os.path.exists(self.csv_file):
-            return
-
-        records = []
+        existing_df = None
+        processed_ids = set()
         fragment_idx = 0
 
-        for file_idx, file_id in enumerate(tqdm.tqdm(
-                                    self.file_ids, desc="Processando arquivos", ncols=120)):
+        if os.path.exists(self.csv_file):
+            existing_df = pd.read_csv(self.csv_file)
+            processed_ids = set(existing_df["file_id"].unique())
+            fragment_idx = existing_df["id_fragment"].max() + 1 if not existing_df.empty else 0
+
+        pending_ids = [fid for fid in self.file_ids if fid not in processed_ids]
+        if not pending_ids:
+            return
+
+        new_records = []
+
+        for file_id in tqdm.tqdm(pending_ids, desc="Processando arquivos", ncols=120):
             fs, data = self.file_loader.load(file_id)
             fragments = self.file_processor.process(fs, data)
 
             for frag in fragments:
                 frag_path = os.path.join(self.processed_dir, f"{fragment_idx}.npy")
                 np.save(frag_path, frag)
-                records.append({
+                new_records.append({
                     "id_fragment": fragment_idx,
-                    "file_id": file_id,
-                    "target": self.targets[file_idx]
+                    "file_id": file_id
                 })
                 fragment_idx += 1
 
-        df = pd.DataFrame(records)
+        df_new = pd.DataFrame(new_records)
+        if existing_df is not None:
+            df = pd.concat([existing_df, df_new], ignore_index=True)
+        else:
+            df = df_new
+
         df.to_csv(self.csv_file, index=False)
         print(f"[prepare_data] Dataset processed with {len(df)} fragments at {self.csv_file}.")
 
-        description = self.__get_hash_base__()
-        desc_file = os.path.join(self.processed_dir, "description.json")
-        with open(desc_file, "w", encoding="utf-8") as f:
-            json.dump(description, f, indent=4, ensure_ascii=False)
-        print(f"[prepare_data] Description saved to {desc_file}")
+        if existing_df is None:
+            description = self.__get_hash_base__()
+            desc_file = os.path.join(self.processed_dir, "description.json")
+            with open(desc_file, "w", encoding="utf-8") as f:
+                json.dump(description, f, indent=4, ensure_ascii=False)
+            print(f"[prepare_data] Description saved to {desc_file}")
 
     def setup(self, stage=None):
         """
         Loads the metadata CSV and generates cross-validation folds.
         """
-        self.dataframe = pd.read_csv(self.csv_file)
+        if os.path.exists(self.csv_file):
+            self.prepare_data()
 
+        df = pd.read_csv(self.csv_file)
+
+        valid_ids = set(self.file_ids)
+        df = df[df["file_id"].isin(valid_ids)].reset_index(drop=True)
+
+        id_to_target = dict(zip(self.file_ids, self.targets))
+        df["target"] = df["file_id"].map(id_to_target)
+
+        self.dataframe = df
         self.folds = self.cv.apply(self.file_ids, self.targets)
         self.set_fold(0)
 
