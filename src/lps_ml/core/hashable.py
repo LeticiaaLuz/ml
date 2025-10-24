@@ -31,7 +31,7 @@ class Hashable:
         elif isinstance(obj, dict):
             return {k: self._serialize(v) for k, v in obj.items()}
         elif isinstance(obj, Hashable):
-            return hash(obj)
+            return obj.__get_hash_base__()
         else:
             return str(obj)
 

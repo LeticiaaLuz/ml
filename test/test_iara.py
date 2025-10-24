@@ -67,11 +67,14 @@ def _main():
     overlap=lps_qty.Time.s(0)
 
     dm = ml_db.IARA(
-            file_processor=ml_procs.TimeProcessor(fs_out=fs_out,
-                                                  duration=duration,
-                                                  overlap=overlap),
+            file_processor=ml_procs.TimeProcessor(
+                    fs_out=fs_out,
+                    duration=duration,
+                    overlap=overlap,
+                    # pipelines=ml_procs.CPADetector(duration, duration * 15)
+                ),
             cv = ml_cv.FiveByTwo(),
-            data_collection = ml_iara.DC.OS,
+            data_collection = ml_iara.DC.A,
             batch_size=16)
 
     print(ml_utils.format_header(60,"Dataset description"))
