@@ -1,0 +1,26 @@
+"""Processor Module
+"""
+import abc
+import typing
+
+import numpy as np
+
+import lps_utils.quantities as lps_qty
+
+import lps_ml.core.hashable as ml_hash
+
+class AudioProcessor(ml_hash.Hashable):
+    """ Abstract class to process audios and get processed windows. """
+
+    @abc.abstractmethod
+    def process(self, fs: lps_qty.Frequency, data: np.array) -> typing.List[np.array]:
+        """
+        Process an audio into processed windows.
+
+        Args:
+            fs (lps_qty.Frequency):  Sampling frequency of the input signal.
+            data (np.array): Audio as a 1D tensor.
+
+        Returns:
+            window_list (list of np.array):  A list of processed windows
+        """

@@ -1,7 +1,7 @@
 """
-Cross Validation
+Cross Validation Module
 
-This module provides functionality to split
+This module provides functionality to split datasets into training, validation, and testing parts.
 """
 import abc
 import enum

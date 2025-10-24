@@ -15,7 +15,7 @@ class MLP(lightning.LightningModule):
             self,
             input_shape: typing.Union[int, typing.Iterable[int]],
             hidden_channels: typing.Union[int, typing.Iterable[int]],
-            n_targets: int = 1,
+            n_targets: int = 2,
             norm_layer: typing.Optional[typing.Callable[..., torch.nn.Module]] = None,
             activation_layer: typing.Optional[typing.Callable[..., torch.nn.Module]] = None,
             activation_output_layer: typing.Optional[typing.Callable[..., torch.nn.Module]] = None,
@@ -35,8 +35,10 @@ class MLP(lightning.LightningModule):
         activation_layer = activation_layer or torch.nn.ReLU
         activation_output_layer = activation_output_layer or torch.nn.Sigmoid
 
+        n_outputs = 1 if n_targets <= 2 else n_targets
+
         if loss_fn is None:
-            if n_targets == 1:
+            if n_outputs == 1:
                 loss_fn = torch.nn.BCEWithLogitsLoss
             else:
                 loss_fn = torch.nn.CrossEntropyLoss
@@ -60,7 +62,7 @@ class MLP(lightning.LightningModule):
                 layers.append(torch.nn.Dropout(dropout))
             in_dim = hidden_dim
 
-        layers.append(torch.nn.Linear(in_dim, n_targets, bias=bias))
+        layers.append(torch.nn.Linear(in_dim, n_outputs, bias=bias))
 
         if activation_output_layer is not None:
             layers.append(activation_output_layer())
@@ -68,7 +70,7 @@ class MLP(lightning.LightningModule):
         self.model = torch.nn.Sequential(*layers)
         self.loss_fn = loss_fn()
         self.lr = lr
-        self.is_binary = n_targets == 1
+        self.is_binary = n_outputs == 1
 
     #pylint: disable=W0221
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:

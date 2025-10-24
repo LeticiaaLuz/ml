@@ -1,88 +1,53 @@
-"""
-Audio dataloader Module
+"""DataModule
 
-This module provides functionality to read .wav files in a dataset.
 """
+import abc
 import os
-import json
 import typing
+import json
 import multiprocessing
 
 import tqdm
-import numpy as np
 import pandas as pd
-
-import scipy.io.wavfile as scipy_wav
+import numpy as np
 
 import torch
 import torch.utils.data as torch_data
 import lightning
 
-import lps_utils.quantities as lps_qty
-import lps_ml.databases.cv as lps_cv
-import lps_ml.utils as lps_utils
-import lps_ml.processors as lps_proc
-import lps_ml.databases.datamodule as lps_dm
+import lps_ml.core.cv as ml_cv
+import lps_ml.core.hashable as ml_hash
+import lps_ml.core.loader as ml_loader
+import lps_ml.core.processor as ml_proc
 
-def _get_iara_id(filename:str) -> int:
-    return int(filename.rsplit('-',maxsplit=1)[-1])
+class BaseDataModule(lightning.LightningDataModule):
+    """ Basic DataModule """
 
-def _default_id(filename: str) -> int:
-    return int(filename)
-
-
-class AudioFileLoader(lps_utils.Hashable):
-    """ Class to find and load audio files """
-
-    def __init__(self,
-                 data_base_dir: str,
-                 extract_id: typing.Callable[[str], int] = _default_id):
-        self.data_base_dir = data_base_dir
-        self.extract_id = extract_id
-        self.file_dict = {}
-        self._find_raw_files()
-
-    def _get_params(self):
-        return {
-            'data_base_dir': self.data_base_dir,
-            'file_dict': len(self.file_dict)
-        }
-
-    def _find_raw_files(self) -> str:
-        for root, _, files in os.walk(self.data_base_dir):
-            for file in files:
-                filename, extension = os.path.splitext(file)
-                if extension == ".wav":
-                    self.file_dict[self.extract_id(filename)] = os.path.join(root, file)
-
-    def load(self, file_id: int) -> typing.Tuple[lps_qty.Frequency, np.array]:
+    def get_sample_shape(self, subset: str = "train") -> typing.List[int]:
         """
-        Function to load data from file
-
-        Args:
-            file_id (int): The ID to search for.
-
-        Returns:
-            typing.Tuple[
-                lps_qty.Frequency:        sample frequency
-                np.array:     data
-            ]:
+        Returns the shape of the dataset samples.
         """
+        if not getattr(self, "_has_setup", False):
+            self.prepare_data()
+            self.setup("fit")
 
-        if file_id not in self.file_dict:
-            raise UnboundLocalError(f'file {file_id} not found in {self.data_base_dir}')
+        if subset == "train":
+            loader = self.train_dataloader()
+        elif subset == "val":
+            loader = self.val_dataloader()
+        elif subset == "test":
+            loader = self.test_dataloader()
+        elif subset == "predict":
+            loader = self.predict_dataloader()
+        else:
+            raise ValueError(f"invalid subset: {subset}")
 
-        fs, data = scipy_wav.read(self.file_dict[file_id])
+        x, _ = next(iter(loader))
+        return list(x.shape[1:])
 
-        if data.ndim != 1:
-            data = data[:,0]
-
-        return lps_qty.Frequency.hz(fs), data
-
-    @staticmethod
-    def iara(data_base_dir: str) -> 'AudioFileLoader':
-        """ Get AudioLoader for IARA dataset. """
-        return AudioFileLoader(data_base_dir=data_base_dir, extract_id=_get_iara_id)
+    @abc.abstractmethod
+    def get_n_targets(self) -> int:
+        """ Return the number of targets in dataset. """
 
 class ProcessedDataset(torch_data.Dataset):
     """ Simple dataset for processed data in .npy format """
@@ -103,28 +68,33 @@ class ProcessedDataset(torch_data.Dataset):
             fragment = self.transform(fragment)
         return torch.from_numpy(fragment).float(), row['target']
 
-class AudioDataModule(lps_dm.DataModule, lps_utils.Hashable):
+class AudioDataModule(BaseDataModule, ml_hash.Hashable):
     """ Basic DataModule for process and load audio datasets. """
 
     def __init__(self,
-                 file_loader: AudioFileLoader,
-                 file_processor: lps_proc.AudioFileProcessor,
-                 file_ids: typing.List[int],
-                 targets: typing.List[int],
+                 file_loader: ml_loader.AudioFileLoader,
+                 file_processor: ml_proc.AudioProcessor,
+                 description_df: pd.DataFrame,
                  processed_dir: str,
                  batch_size: int = 32,
                  num_workers: int = None,
-                 cv: lps_cv.CrossValidator = None,
-                 transform=None):
+                 cv: ml_cv.CrossValidator = None,
+                 transform=None,
+                 id_column: str = "ID",
+                 target_column: str = "Target"):
         super().__init__()
         self.file_loader = file_loader
         self.file_processor = file_processor
-        self.file_ids = file_ids
-        self.targets = targets
+        self.description_df = description_df
         self.batch_size = batch_size
         self.num_workers = num_workers or max(1, multiprocessing.cpu_count() // 2)
-        self.cv = cv or lps_cv.HoldOutCV()
+        self.cv = cv or ml_cv.HoldOutCV()
         self.transform = transform
+        self.id_column = id_column
+        self.target_column = target_column
+
+        self.file_ids = description_df[id_column].to_list()
+        self.targets = description_df[target_column].to_list()
 
         self.dataframe = None
         self.folds = None
@@ -148,7 +118,6 @@ class AudioDataModule(lps_dm.DataModule, lps_utils.Hashable):
         os.makedirs(self.processed_dir, exist_ok=True)
 
         if os.path.exists(self.csv_file):
-            print(f"[prepare_data] CSV ready: {self.csv_file}, skipping processing chain.")
             return
 
         records = []
@@ -206,9 +175,9 @@ class AudioDataModule(lps_dm.DataModule, lps_utils.Hashable):
         df = self.dataframe.copy()
         df["group"] = df["file_id"].map(fold_map)
 
-        self.train_df = df[df["group"] == lps_cv.FoldRole.TRAIN]
-        self.val_df = df[df["group"] == lps_cv.FoldRole.VALIDATION]
-        self.test_df = df[df["group"] == lps_cv.FoldRole.TEST]
+        self.train_df = df[df["group"] == ml_cv.FoldRole.TRAIN]
+        self.val_df = df[df["group"] == ml_cv.FoldRole.VALIDATION]
+        self.test_df = df[df["group"] == ml_cv.FoldRole.TEST]
 
     def train_dataloader(self):
         return torch_data.DataLoader(
@@ -231,3 +200,11 @@ class AudioDataModule(lps_dm.DataModule, lps_utils.Hashable):
 
     def get_n_targets(self) -> int:
         return len(set(self.targets))
+
+    def to_df(self) -> pd.DataFrame:
+        """ Returns dataset information as a DataFrame. """
+        return self.description_df
+
+    def to_compile_df(self) -> pd.DataFrame:
+        """ Returns dataset compiled information as a DataFrame. """
+        return self.description_df.groupby(self.target_column).size().reset_index(name='Qty')

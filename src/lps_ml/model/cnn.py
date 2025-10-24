@@ -4,7 +4,7 @@ Module containing a Convolutional Neural Network (CNN) based models.
 import typing
 import torch
 
-import lps_ml.models.mlp as lps_mlp
+import lps_ml.model.mlp as lps_mlp
 
 
 class CNN(lps_mlp.MLP):
@@ -24,7 +24,7 @@ class CNN(lps_mlp.MLP):
         padding: int = None,
 
         classification_n_neurons: typing.Union[int, typing.Iterable[int]] = 128,
-        n_targets: int = 1,
+        n_targets: int = 2,
         classification_dropout: float = 0,
         classification_norm: typing.Optional[typing.Callable] = None,
         classification_hidden_activation: typing.Optional[typing.Callable] = None,

@@ -1,6 +1,4 @@
 """
-Module for data visualization.
-
 This module provides functions to visualize high-dimensional data using t-distributed Stochastic
 Neighbor Embedding (t-SNE), a dimensionality reduction technique particularly useful for visualizing
 complex datasets in a lower-dimensional space.

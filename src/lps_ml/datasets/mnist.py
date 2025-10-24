@@ -7,9 +7,9 @@ import torch.utils.data as torch_data
 import torchvision.datasets as torch_set
 import torchvision.transforms as torch_trf
 
-import lps_ml.databases.datamodule as lps_dm
+import lps_ml.core as ml_core
 
-class MNISTDM(lps_dm.DataModule):
+class MNIST(ml_core.BaseDataModule):
     """ Simple MNIST DataModule. """
 
     def __init__(self, data_dir: str, batch_size: int = 32,

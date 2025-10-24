@@ -5,7 +5,7 @@ This script generates tables describing compiled information.
 """
 import pandas as pd
 
-import lps_ml.databases.iara as lps_iara
+import lps_ml.datasets.iara as iara
 
 
 def main():
@@ -13,10 +13,10 @@ def main():
 
     os_ship_merged = []
     collection_list = [
-        lps_iara.Collection.A,
-        lps_iara.Collection.B,
-        lps_iara.Collection.C,
-        lps_iara.Collection.D,
+        iara.DC.A,
+        iara.DC.B,
+        iara.DC.C,
+        iara.DC.D,
     ]
 
     for sub in collection_list:
@@ -64,7 +64,7 @@ def main():
     print(os_ship_type)
 
 
-    os_bg = lps_iara.Collection.E.to_df()
+    os_bg = iara.DC.E.to_df()
 
     print('\n------------------------- os_bg -----------------------------------------')
     print(os_bg)
@@ -72,8 +72,8 @@ def main():
 
     glider_ship_merged = []
     collection_list = [
-        lps_iara.Collection.F,
-        lps_iara.Collection.G,
+        iara.DC.F,
+        iara.DC.G,
     ]
     for sub in collection_list:
         df = sub.to_df()

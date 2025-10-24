@@ -1,111 +1,14 @@
 """
-IARA Records Module
-
-This module provides functionality to access information about the audio record collections of IARA.
+Selection Module
 """
-import enum
-import os
 import typing
 import abc
 
 import pandas as pd
 
-class Collection(enum.Enum):
-    """Enum representing the different audio record collections of IARA."""
-    A = 0
-    OS_NEAR_CPA_IN = 0
-    B = 1
-    OS_NEAR_CPA_OUT = 1
-    C = 2
-    OS_FAR_CPA_IN = 2
-    D = 3
-    OS_FAR_CPA_OUT = 3
-    OS_CPA_IN = 4
-    OS_CPA_OUT = 5
-    OS_SHIP = 6
-
-    E = 7
-    OS_BG = 7
-    OS = 8
-
-    F = 9
-    GLIDER_CPA_IN = 9
-    G = 10
-    GLIDER_CPA_OUT = 10
-    GLIDER_SHIP = 11
-
-    H = 12
-    GLIDER_BG = 12
-    GLIDER = 13
-
-    COMPLETE = 14
-
-    def __str__(self) -> str:
-        """Return a string representation of the collection."""
-        return str(self.name).rsplit(".", maxsplit=1)[-1]
-
-    def _get_info_filename(self) -> str:
-        """Return the internal filename for collection information."""
-        return os.path.join(os.path.dirname(__file__),
-                            "dataset_info",
-                            "iara.csv")
-
-    def get_selection_str(self) -> str:
-        """Get string to filter the 'Dataset' column."""
-        if self == Collection.OS_CPA_IN:
-            return Collection.A.get_selection_str() + \
-                "|" + Collection.C.get_selection_str()
-
-        if self == Collection.OS_CPA_OUT:
-            return Collection.B.get_selection_str() + \
-                 "|" + Collection.D.get_selection_str()
-
-        if self == Collection.OS_SHIP:
-            return Collection.OS_CPA_IN.get_selection_str() + \
-                "|" + Collection.OS_CPA_OUT.get_selection_str()
-
-        if self == Collection.OS:
-            return Collection.OS_SHIP.get_selection_str()+ \
-                "|" + Collection.OS_BG.get_selection_str()
-
-        if self == Collection.GLIDER_SHIP:
-            return Collection.F.get_selection_str() + \
-                "|" + Collection.G.get_selection_str()
-
-        if self == Collection.GLIDER:
-            return Collection.GLIDER_SHIP.get_selection_str() + \
-                "|" + Collection.GLIDER_BG.get_selection_str()
-
-        return str(self.name).rsplit(".", maxsplit=1)[-1]
-
-    def get_prettier_str(self) -> str:
-        """Get a prettier string representation of the collection."""
-        labels = [
-            "near cpa in",
-            "near cpa out",
-            "far cpa in",
-            "far cpa out",
-            "cpa in",
-            "cpa out",
-            "os ship",
-            "os bg",
-            "os",
-            "glider cpa in",
-            "glider cpa out",
-            "glider ship",
-        ]
-        return labels[self.value]
-
-    def to_df(self) -> pd.DataFrame:
-        """Get information about the collection as a DataFrame.
-        Returns:
-            pd.DataFrame: A DataFrame containing detailed information about the collection.
-        """
-        df = pd.read_csv(self._get_info_filename(), na_values=[" - "])
-        return df.loc[df['Dataset'].str.contains(self.get_selection_str())]
-
 class Filter():
     """Abstract base class representing a filter to apply on a collection."""
+
     @abc.abstractmethod
     def apply(self, input_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -120,6 +23,7 @@ class Filter():
 
 class LabelFilter():
     """Class representing a filter based on values present in a column on a collection."""
+
     def __init__(self,
                  column: str,
                  values: typing.List[str]):
@@ -225,9 +129,6 @@ class LabelTarget(LabelFilter, Target):
             input_df[self.DEFAULT_TARGET_HEADER].astype(int)
         return input_df
 
-    def grouped_column(self) -> str:
-        return self.column
-
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Target):
             return (self.column == other.column and
@@ -235,12 +136,22 @@ class LabelTarget(LabelFilter, Target):
                     self.include_others == other.include_others)
         return False
 
+    @classmethod
+    def from_dataframe(cls,
+                       input_df: pd.DataFrame,
+                       column: str) -> 'LabelTarget':
+        """
+        Create a LabelTarget automatically from unique values in a column.
+        """
+        _, uniques = pd.factorize(input_df[column])
+        return cls(column=column, values=uniques.tolist(), include_others=False)
+
 class CallbackTarget(Target):
     """ Class to implement target based on a callback function. """
 
     def __init__(self,
                  n_targets : int,
-                 function: typing.Callable[[pd.DataFrame],int],
+                 function: typing.Callable[[pd.Series],int],
                  include_others: bool = False):
         super().__init__(n_targets=n_targets, include_others=include_others)
         self.function = function
@@ -265,67 +176,22 @@ class CallbackTarget(Target):
                     self.include_others == other.include_others)
         return False
 
-class CustomCollection:
-    """Class representing a selection of collection with targets."""
+class Selection:
+    """ Class representing a selection of data and define targets."""
 
     def __init__(self,
-                 collection: Collection,
                  target: Target,
                  filters: typing.Union[typing.List[Filter], Filter] = None):
-        """
-        Parameters:
-        - collection (Collection): Collection to be used.
-        - target (Target): Target selection for training.
-        - filters (List[Filter], optional): List of filters to be applied.
-            Default is use all collection.
-        """
-        self.collection = collection
+
         self.target = target
         self.filters = [] if filters is None else \
                 (filters if isinstance(filters, list) else [filters])
 
-    def __str__(self) -> str:
-        """Return a string representation of the CustomCollection object."""
-        return str(self.to_df())
+    def apply (self, input_df : pd.DataFrame) -> pd.DataFrame:
+        """ Apply selection to an input_df. """
 
-    def to_df(self) -> pd.DataFrame:
-        """
-        Generate a DataFrame with information from the collection based on specified filters
-            and target configuration.
-
-        Returns:
-            pd.DataFrame: DataFrame containing the collection information after applying filters
-                and target mapping.
-        """
-        df = self.collection.to_df()
+        df = input_df
         for filt in self.filters:
             df = filt.apply(df)
 
-        df = self.target.apply(df)
-        return df
-
-    def to_compiled_df(self, df=None) -> pd.DataFrame:
-        """ Generate a compact dataframe based on grouped column. """
-
-        df = self.to_df() if df is None else df
-        if self.target.include_others:
-            df_label = df[df['Target'] != self.target.get_n_targets() - 1]
-            df_others = df[df['Target'] == self.target.get_n_targets() - 1]
-
-            df_label = df_label.groupby(self.target.grouped_column()).size().reset_index(name='Qty')
-            new_row = pd.DataFrame({self.target.grouped_column(): ['Others'],
-                                    'Qty': [df_others.shape[0]]})
-
-            df = pd.concat([df_label, new_row])
-
-        else:
-            df = df.groupby(self.target.grouped_column()).size().reset_index(name='Qty')
-
-        return df
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, CustomCollection):
-            return (self.collection == other.collection and
-                    self.target == other.target and
-                    self.filters == other.filters)
-        return False
+        return self.target.apply(df)

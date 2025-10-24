@@ -1,35 +1,14 @@
-"""Processors Module
-
-Define AudioFileProcessor interface and some processors
+"""Resample
 """
-import abc
 import typing
 
 import numpy as np
 
-import lps_sp.signal as lps_signal
 import lps_utils.quantities as lps_qty
+import lps_sp.signal as lps_signal
+import lps_ml.core as ml_core
 
-import lps_ml.utils as lps_utils
-
-class AudioFileProcessor(lps_utils.Hashable):
-    """ Abstract class to process and audio file and get training window. """
-
-    @abc.abstractmethod
-    def process(self, fs: lps_qty.Frequency, data: np.array) -> typing.List[np.array]:
-        """
-        Process an audio into training windows.
-
-        Args:
-            fs (lps_qty.Frequency):  Sampling frequency of the input signal.
-            data (np.array): Audio as a 1D tensor.
-
-        Returns:
-            windows (list of np.array):  A list of processed audio windows
-        """
-
-
-class WindowingResampler(AudioFileProcessor):
+class SlidingWindowResampler(ml_core.AudioProcessor):
     """ Simple processor to resample and fragment the audio data. """
 
     def __init__(self,

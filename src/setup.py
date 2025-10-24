@@ -31,5 +31,5 @@ setuptools.setup(
         # List your project dependencies here
     ],
     # Uncomment and specify package data if needed
-    package_data={package_name: ['databases/dataset_info/*.csv']},
+    package_data={package_name: ['datasets/dataset_info/*.csv']},
 )

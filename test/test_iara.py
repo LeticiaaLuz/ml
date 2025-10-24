@@ -1,4 +1,5 @@
-"""Simple trainer in 4 classes dataset
+"""
+IARA
 """
 import argparse
 
@@ -11,15 +12,18 @@ import lightning.pytorch.callbacks as lightning_call
 
 import lps_utils.quantities as lps_qty
 
-import lps_ml.models.mlp as lps_mlp
-import lps_ml.utils as lps_utils
-import lps_ml.databases.cv as lps_cv
-import lps_ml.processors as lps_proc
-import lps_ml.databases.four_classes as lps_4classes
+import lps_ml.utils.device as ml_device
+import lps_ml.model as ml_model
+import lps_ml.core.cv as ml_cv
+import lps_ml.audio_processors as ml_procs
+import lps_ml.datasets as ml_db
+import lps_ml.datasets.selection as ml_sel
+import lps_ml.utils.general as ml_utils
+import lps_ml.datasets.iara as ml_iara
 
 def _evaluate_accuracy(model: torch.nn.Module,
                       dataloader: torch_data.DataLoader):
-    device = lps_utils.get_available_device()
+    device = ml_device.get_available_device()
     model.eval()
     model.to(device)
 
@@ -43,10 +47,11 @@ def _evaluate_accuracy(model: torch.nn.Module,
     return acc
 
 def _main():
+    """Main function for the dataset info tables."""
 
-    parser = argparse.ArgumentParser(description="Train an MLP classifier on MNIST.")
+    parser = argparse.ArgumentParser(description="Train an MLP classifier on iara.")
     parser.add_argument("--data-dir", type=str, default="/data",
-                        help="Directory to store MNIST data.")
+                        help="Directory to store iara data.")
     parser.add_argument("--batch-size", type=int, default=64,
                         help="Batch size for training.")
     parser.add_argument("--max-epochs", type=int, default=200,
@@ -61,32 +66,39 @@ def _main():
     duration=lps_qty.Time.s(1)
     overlap=lps_qty.Time.s(0)
 
-    dm = lps_4classes.FourClasses(
-            file_processor=lps_proc.WindowingResampler(fs_out=fs_out,
+    dm = ml_db.IARA(
+            file_processor=ml_procs.SlidingWindowResampler(fs_out=fs_out,
                                                         duration=duration,
                                                         overlap=overlap),
-            cv = lps_cv.FiveByTwo(),
-            batch_size=8)
+            cv = ml_cv.FiveByTwo(),
+            data_collection = ml_iara.DC.OS,
+            batch_size=16)
 
-    model = lps_mlp.MLP(
+    print(ml_utils.format_header(60,"Dataset description"))
+    print(dm.to_compile_df())
+    print(ml_utils.format_header(60))
+    print()
+    print(ml_utils.format_header(60,"Training"))
+
+    model = ml_model.MLP(
         input_shape=dm.get_sample_shape(),
-        hidden_channels=[64, 16],
+        hidden_channels=[256, 32],
         n_targets=dm.get_n_targets(),
-        loss_fn=torch.nn.CrossEntropyLoss,
-        lr=args.lr,
+        dropout=0.2,
+        lr=1e-4
     )
 
     checkpoint_cb = lightning_call.ModelCheckpoint(
         monitor="val_loss",
         save_top_k=1,
         mode="min",
-        filename=f"mnist-{{epoch:02d}}-{{val_loss:.3f}}",
+        filename=f"iara-{{epoch:02d}}-{{val_loss:.3f}}",
     )
     early_stop_cb = lightning_call.EarlyStopping(monitor="val_loss", patience=4, mode="min")
 
     logger = lightning_log.TensorBoardLogger(
         "logs",
-        name="mnist"
+        name="iara"
     )
 
     trainer = lightning.Trainer(
@@ -104,11 +116,13 @@ def _main():
     val_acc   = _evaluate_accuracy(model, dm.val_dataloader())
     # test_acc  = _evaluate_accuracy(model, dm.test_dataloader())
 
-    print(f"{'='*60}")
+    print(ml_utils.format_header(60))
+    print()
+    print(ml_utils.format_header(60,"Results"))
     print(f"Train accuracy:      {train_acc:.4f}")
     print(f"Validation accuracy: {val_acc:.4f}")
     # print(f"Test accuracy:       {test_acc:.4f}")
-    print(f"{'='*60}")
+    print(ml_utils.format_header(60))
 
 if __name__ == "__main__":
     _main()

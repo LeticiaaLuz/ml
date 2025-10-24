@@ -12,14 +12,13 @@ import lightning
 import lightning.pytorch.loggers as lightning_log
 import lightning.pytorch.callbacks as lightning_call
 
-import lps_ml.databases.mnist as lps_dm
-import lps_ml.models.mlp as lps_mlp
-import lps_ml.models.cnn as lps_cnn
-import lps_ml.utils as lps_utils
+import lps_ml.datasets as ml_db
+import lps_ml.model as ml_model
+import lps_ml.utils.device as ml_device
 
 def _evaluate_accuracy(model: torch.nn.Module,
                       dataloader: torch_data.DataLoader):
-    device = lps_utils.get_available_device()
+    device = ml_device.get_available_device()
     model.eval()
     model.to(device)
 
@@ -61,13 +60,13 @@ def _main():
 
     torch.set_float32_matmul_precision('medium')
 
-    dm = lps_dm.MNISTDM(data_dir=args.data_dir,
-                        batch_size=args.batch_size,
-                        binary=args.binary)
+    dm = ml_db.MNIST(data_dir=args.data_dir,
+                     batch_size=args.batch_size,
+                     binary=args.binary)
     dm.prepare_data = lambda: None
 
     if args.model == "mlp":
-        model = lps_mlp.MLP(
+        model = ml_model.MLP(
             input_shape=dm.get_sample_shape(),
             hidden_channels=[64],
             n_targets=dm.get_n_targets(),
@@ -75,7 +74,7 @@ def _main():
             lr=args.lr,
         )
     elif args.model == "cnn":
-        model = lps_cnn.CNN(
+        model = ml_model.CNN(
             input_shape=dm.get_sample_shape(),
             conv_n_neurons=[32, 64],
             n_targets=dm.get_n_targets(),
@@ -89,7 +88,11 @@ def _main():
         monitor="val_loss",
         save_top_k=1,
         mode="min",
-        filename=f"mnist-{args.model}-{'binary' if args.binary else 'multi'}-{{epoch:02d}}-{{val_loss:.3f}}",
+        filename=(
+            f"mnist-{args.model}-"
+            f"{'binary' if args.binary else 'multi'}-"
+            f"{{epoch:02d}}-{{val_loss:.3f}}"
+        ),
     )
     early_stop_cb = lightning_call.EarlyStopping(monitor="val_loss", patience=4, mode="min")
 
@@ -114,7 +117,8 @@ def _main():
     test_acc  = _evaluate_accuracy(model, dm.test_dataloader())
 
     print(f"{'='*60}")
-    print(f"Model: {args.model.upper()} | Mode: {'Binary (Even/Odd)' if args.binary else 'Multiclass (0–9)'}")
+    print(f"Model: {args.model.upper()} | "
+          f"Mode: {'Binary (Even/Odd)' if args.binary else 'Multiclass (0–9)'}")
     print(f"Train accuracy:      {train_acc:.4f}")
     print(f"Validation accuracy: {val_acc:.4f}")
     print(f"Test accuracy:       {test_acc:.4f}")
