@@ -64,17 +64,18 @@ def _main():
 
     fs_out=lps_qty.Frequency.khz(16)
     duration=lps_qty.Time.s(1)
-    overlap=lps_qty.Time.s(0)
+    overlap=lps_qty.Time.s(0.75)
 
     dm = ml_db.IARA(
             file_processor=ml_procs.TimeProcessor(
                     fs_out=fs_out,
                     duration=duration,
                     overlap=overlap,
-                    # pipelines=ml_procs.CPADetector(duration, duration * 15)
+                    pipelines=ml_procs.CPADetector(duration, duration * 60)
                 ),
             cv = ml_cv.FiveByTwo(),
             data_collection = ml_iara.DC.A,
+            selection=ml_iara.CargoShipClassifier.IDENTIFIED.as_selector(),
             batch_size=16)
 
     print(ml_utils.format_header(60,"Dataset description"))
@@ -85,10 +86,10 @@ def _main():
 
     model = ml_model.MLP(
         input_shape=dm.get_sample_shape(),
-        hidden_channels=[256, 32],
+        hidden_channels=[64, 16],
         n_targets=dm.get_n_targets(),
         dropout=0.2,
-        lr=1e-4
+        lr=1e-5
     )
 
     checkpoint_cb = lightning_call.ModelCheckpoint(

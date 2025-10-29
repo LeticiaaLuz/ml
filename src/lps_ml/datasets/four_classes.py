@@ -31,11 +31,11 @@ class FourClasses(ml_core.AudioDataModule):
                  data_dir: str = "/data/4classes",
                  batch_size: int = 32,
                  cv: ml_core.CrossValidator = None,
-                 selection: ml_sel.Selection = None,
+                 selection: ml_sel.Selector = None,
                  num_workers: int = None):
 
         df = FourClasses.as_df()
-        selection = selection or ml_sel.Selection(
+        selection = selection or ml_sel.Selector(
                                         ml_sel.LabelTarget.from_dataframe(column="Class",
                                                                           input_df=df))
 

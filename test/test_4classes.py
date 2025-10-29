@@ -70,7 +70,7 @@ def _main():
                                                   overlap=overlap),
             cv = ml_cv.FiveByTwo(),
             batch_size=16,
-            selection = ml_sel.Selection(
+            selection = ml_sel.Selector(
                                 ml_sel.LabelTarget(column="Class", values= ["B", "C"]))
         )
 

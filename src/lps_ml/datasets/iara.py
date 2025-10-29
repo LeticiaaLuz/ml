@@ -108,7 +108,7 @@ class DataCollection(enum.Enum):
 
 DC = DataCollection
 
-class ShipLength(enum.Enum):
+class ShipLengthClassifier(enum.Enum):
     """ Enum class to represent ship length as in original paper. """
     # https://www.mdpi.com/2072-4292/11/3/353
     SMALL = 0
@@ -117,27 +117,142 @@ class ShipLength(enum.Enum):
     BACKGROUND = 3
 
     @staticmethod
-    def classify(ship_length: typing.Union[float, int, str, 'lps_qty.Distance']) -> 'ShipLength':
+    def classify(ship_length: typing.Union[float, int, str, 'lps_qty.Distance']) -> 'ShipLengthClassifier':
         """ Function to convert length in meter to the enum. """
 
         if isinstance(ship_length, lps_qty.Distance):
-            return ShipLength.classify(ship_length.get_m())
+            return ShipLengthClassifier.classify(ship_length.get_m())
 
         if isinstance(ship_length, str):
             try:
-                return ShipLength.classify(float(ship_length))
+                return ShipLengthClassifier.classify(float(ship_length))
             except ValueError:
-                return ShipLength.classify(np.nan)
+                return ShipLengthClassifier.classify(np.nan)
 
         if np.isnan(ship_length):
-            return ShipLength.BACKGROUND
+            return ShipLengthClassifier.BACKGROUND
 
         if ship_length < 50:
-            return ShipLength.SMALL
+            return ShipLengthClassifier.SMALL
         if ship_length < 100:
-            return ShipLength.MEDIUM
+            return ShipLengthClassifier.MEDIUM
 
-        return ShipLength.LARGE
+        return ShipLengthClassifier.LARGE
+
+    @staticmethod
+    def as_selector(colunm_id : str = "Length") -> ml_sel.Selector:
+        """ Get Selection for IARA dataset. """
+        return ml_sel.Selector(
+                target = ml_sel.CallbackTarget(
+                        n_targets = 4,
+                        function = lambda df: ShipLengthClassifier.classify(df[colunm_id]).value))
+
+class CargoShipClassifier(enum.Enum):
+    """ Enum defining modes for selecting ships for classification tasks. """
+    IDENTIFIED = 0
+    SIMILAR = 1
+    SIMILAR_EXCL_IDENTIFIED = 2
+    GENERAL = 3
+    GENERAL_EXCL_IDENTIFIED = 4
+    GENERAL_EXCL_SIMILAR = 5
+
+    @staticmethod
+    def _identified_ship_constraints():
+        return [
+            [
+                {"header": "Ship ID", "value": [44, 626, 580]},
+                {"header": "Ship ID", "value": [439]},
+                {"header": "Ship ID", "value": [161, 600]},
+                {"header": "Ship ID", "value": [444, 2]}
+            ],[
+                {"header": "Ship ID", "value": [179, 125, 275]},
+                {"header": "Ship ID", "value": [193]},
+                {"header": "Ship ID", "value": [297, 303, 501]},
+                {"header": "Ship ID", "value": [186, 497]}
+            ]]
+
+    @staticmethod
+    def _similar_ship_constraints():
+        return [
+            [
+                {"header": "SHIPTYPE", "value": ["Fishing"]},
+                {"header": "SHIPTYPE", "value": ["Pleasure Craft"]},
+                {"header": "SHIPTYPE", "value": ["Tug"]},
+                {"header": "DETAILED TYPE", "value": ["Suction Dredger"]}
+            ], [
+                {"header": "DETAILED TYPE", "value": ["Bulk Carrier"]},
+                {"header": "DETAILED TYPE", "value": ["Vehicles Carrier"]},
+                {"header": "DETAILED TYPE", "value": ["Container Ship"]},
+                {"header": "SHIPTYPE", "value": ["Tanker"]}
+            ]]
+
+    @staticmethod
+    def _general_classifier_constraints():
+        return [
+            [
+                {"header": "SHIPTYPE", "value": ["Fishing", "Pleasure Craft",
+                                                 "Tug", "Special Craft"]},
+                {"header": "DETAILED TYPE", "value": ["Suction Dredger"]}
+            ],
+            [
+                {"header": "SHIPTYPE", "value": ["Cargo", "Tanker"]},
+            ]
+        ]
+
+    def as_selector(self) -> ml_sel.Selector:
+        """Return a Selector object based on the requested mode."""
+
+        if self == CargoShipClassifier.IDENTIFIED:
+            ship_constraints = self._identified_ship_constraints()
+            return ml_sel.Selector(
+                target=ml_sel.ConstraintTarget(constraints=ship_constraints,
+                                               include_others=False)
+            )
+
+        elif self == CargoShipClassifier.SIMILAR:
+            similar_constraints = self._similar_ship_constraints()
+            return ml_sel.Selector(
+                target=ml_sel.ConstraintTarget(constraints=similar_constraints,
+                                               include_others=False)
+            )
+
+        elif self == CargoShipClassifier.SIMILAR_EXCL_IDENTIFIED:
+            ship_constraints = self._identified_ship_constraints()
+            similar_constraints = self._similar_ship_constraints()
+
+            return ml_sel.Selector(
+                target=ml_sel.ConstraintTarget(constraints=similar_constraints,
+                                               include_others=False),
+                filters=ml_sel.ConstraintFilter(constraints=ship_constraints)
+            )
+
+        elif self == CargoShipClassifier.GENERAL:
+            general_constraints = self._general_classifier_constraints()
+            return ml_sel.Selector(
+                target=ml_sel.ConstraintTarget(constraints=general_constraints,
+                                               include_others=False)
+            )
+
+        elif self == CargoShipClassifier.GENERAL_EXCL_IDENTIFIED:
+            ship_constraints = self._identified_ship_constraints()
+            general_constraints = self._general_classifier_constraints()
+            return ml_sel.Selector(
+                target=ml_sel.ConstraintTarget(constraints=general_constraints,
+                                               include_others=False),
+                filters=ml_sel.ConstraintFilter(constraints=ship_constraints)
+            )
+
+        elif self == CargoShipClassifier.GENERAL_EXCL_SIMILAR:
+            similar_constraints = self._similar_ship_constraints()
+            general_constraints = self._general_classifier_constraints()
+            return ml_sel.Selector(
+                target=ml_sel.ConstraintTarget(constraints=general_constraints,
+                                               include_others=False),
+                filters=ml_sel.ConstraintFilter(constraints=similar_constraints)
+            )
+
+        else:
+            raise ValueError(f"Unsupported CargoShipClassifier: {self}")
 
 
 class IARA(ml_core.AudioDataModule):
@@ -149,13 +264,6 @@ class IARA(ml_core.AudioDataModule):
         return ml_core.AudioFileLoader(data_base_dir=data_base_dir,
                 extract_id=lambda filename: int(filename.rsplit('-', maxsplit=1)[-1]))
 
-    @staticmethod
-    def length_selector(colunm_id : str = "Length") -> ml_sel.Selection:
-        """ Get Selection for IARA dataset. """
-        return ml_sel.Selection(
-                target = ml_sel.CallbackTarget(
-                        n_targets = 4,
-                        function = lambda df: ShipLength.classify(df[colunm_id]).value))
 
     def __init__(self,
                  file_processor: ml_core.AudioProcessor,
@@ -164,11 +272,11 @@ class IARA(ml_core.AudioDataModule):
                  data_dir: str = "/data/IARA",
                  batch_size: int = 32,
                  cv: ml_core.CrossValidator = None,
-                 selection: ml_sel.Selection = None,
+                 selection: ml_sel.Selector = None,
                  num_workers: int = None):
 
         df = data_collection.to_df()
-        selection = selection or IARA.length_selector()
+        selection = selection or ShipLengthClassifier.as_selector()
 
         super().__init__(file_loader = IARA.loader(data_base_dir=data_dir),
                          file_processor = file_processor,
