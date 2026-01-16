@@ -10,7 +10,7 @@ from ml.src.lps_ml.datasets import FourClasses
 from ml.src.lps_ml.core import AudioDataModule
 import ml.src.lps_ml.core as ml_core
 
-# 1. Dataset e Processadores 
+# 1. Dataset e Processados 
 class FragmentDataset(Dataset):
     def __init__(self, df_fragmentos, pasta_real):
         self.df, self.pasta = df_fragmentos, pasta_real
@@ -41,7 +41,7 @@ class TimeProcessor(ml_core.AudioProcessor):
 
 
 if __name__ == "__main__":
-    CLASSES = ["A", "B"] 
+    CLASSES = ["A", "B", "C", "D"] 
     METRICA = "KL_DIVERGENCE"
     PASTA_RAIZ = "C:/Users/letic/iniciacao_cientifica/4classes"
     PASTA_BASE_PROC = "C:/Users/letic/iniciacao_cientifica/processados"
@@ -99,5 +99,5 @@ if __name__ == "__main__":
 
     print("-" * 50)
     print("\n=== MATRIZ DE DISSIMILITUDE FINAL ===")
-    print(results)
+    print(results)  
    

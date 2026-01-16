@@ -76,7 +76,58 @@ class AudioComparator:
             funcao_metrica = getattr(metrica_modulo, metrica_nome) 
             return funcao_metrica(d1, d2)
         except Exception as e:
-            # Se não encontrar o arquivo euclidian_mean_distance.py, cairá aqui
             print(f"-> Métrica '{metrica_nome}' não encontrada. Usando fallback (Diferença de Médias).")
             return float(np.abs(np.mean(d1) - np.mean(d2)))
 
+
+# Teste Simulado
+if __name__ == "__main__":
+    import torch
+    
+    print("=== SETUP: CRIANDO DADOS PARA TESTE ===")
+    
+    # Criamos 2 lotes (batches) com dados aleatórios (distribuição normal)
+    # Cada batch tem 5 fragmentos de 4410 amostras
+    lote_1 = (torch.randn(5, 4410), torch.zeros(5))
+    lote_2 = (torch.randn(5, 4410), torch.zeros(5))
+    
+    # Loader A e Loader B são idênticos (esperamos dissimilitude baixa/zero)
+    loader_a = [lote_1, lote_2]
+    loader_b = [lote_1, lote_2]
+    
+    # Loader C é muito diferente (multiplicado por 5 e somado 2)
+    lote_distorcido = (torch.randn(5, 4410) * 5 + 2, torch.zeros(5))
+    loader_c = [lote_distorcido, lote_distorcido]
+
+    
+    comparator = AudioComparator(n_bins=100)
+
+    print("\n=== TESTE 1: COMPARANDO DADOS IGUAIS (A vs B) ===")
+    
+    # Chamando KL Divergence
+    res_kl = comparator.comparar(loader_a, loader_b, metrica="KL_DIVERGENCE")
+    print(f"-> KL Divergence: {res_kl:.4f}")
+
+    # Chamando Wasserstein
+    res_ws = comparator.comparar(loader_a, loader_b, metrica="WASSERSTEIN")
+    print(f"-> Wasserstein  : {res_ws:.4f}")
+
+    # Chamando euclidian
+    res_ws = comparator.comparar(loader_a, loader_b, metrica="euclidian_mean_distance")
+    print(f"-> Euclidian  : {res_ws:.4f}")
+
+    print("\n=== TESTE 2: COMPARANDO DADOS DIFERENTES (A vs C) ===")
+    
+    # Chamando KL Divergence para dados diferentes
+    res_kl_diff = comparator.comparar(loader_a, loader_c, metrica="KL_DIVERGENCE")
+    print(f"-> KL Divergence (Diferente): {res_kl_diff:.4f}")
+
+    # Chamando Wasserstein para dados diferentes
+    res_ws_diff = comparator.comparar(loader_a, loader_c, metrica="WASSERSTEIN")
+    print(f"-> Wasserstein  (Diferente): {res_ws_diff:.4f}")
+
+    # Chamando euclidian para dados diferentes
+    res_ws = comparator.comparar(loader_a, loader_c, metrica="euclidian_mean_distance")
+    print(f"-> Euclidian (Diferente)  : {res_ws:.4f}")
+
+    print("\n=== FIM DA DEMONSTRAÇÃO ===")
