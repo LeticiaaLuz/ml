@@ -1,103 +1,91 @@
-import torch
-import numpy as np
 import pandas as pd
-import os
-import sys
-from torch.utils.data import Dataset, DataLoader
+import numpy as np
+import lps_ml.datasets as ml_db
+import lps_ml.datasets.selection as ml_sel
+import lps_ml.audio_processors as ml_procs
+import lps_ml.core.cv as ml_cv
 import lps_utils.quantities as lps_qty
-from test_parte1 import AudioComparator 
-from ml.src.lps_ml.datasets import FourClasses
-from ml.src.lps_ml.core import AudioDataModule
-import ml.src.lps_ml.core as ml_core
+import torch
 
-# 1. Dataset e Processados 
-class FragmentDataset(Dataset):
-    def __init__(self, df_fragmentos, pasta_real):
-        self.df, self.pasta = df_fragmentos, pasta_real
-    def __len__(self): return len(self.df)
-    def __getitem__(self, idx):
-       
-        path = os.path.join(self.pasta, f"{int(self.df.iloc[idx]['id_fragment'])}.npy")
-        return torch.from_numpy(np.load(path)).float(), 0
+# Importando o Comparator e o Enum de Metrica do seu arquivo Parte 1
+from test_parte1 import AudioComparator, Metrica
 
-# 2. Classes de Processamento - não consegui acessar direto
-class Resampler(ml_core.AudioPipeline):
-    def __init__(self, fs_out): 
-        super().__init__()
-        self.fs_out = fs_out
-    def process(self, fs, data):
-        if fs <= self.fs_out: return fs, data
-        from signal_processing.src.lps_sp import signal as lps_signal
-        return self.fs_out, lps_signal.decimate(data, fs / self.fs_out)
+PASTA_RAIZ = "C:/Users/letic/iniciacao_cientifica/4classes"
+PASTA_PROC = "C:/Users/letic/iniciacao_cientifica/processados"
+CLASSES = ["A", "B", "C", "D"]
 
-class TimeProcessor(ml_core.AudioProcessor):
-    def __init__(self, duration, fs_out):
-        super().__init__(); self.duration, self.fs_out = duration, fs_out
-        self.pipeline = Resampler(fs_out)
-    def process(self, fs, data):
-        fs, data = self.pipeline.process(fs, data)
-        win = int(self.duration * fs)
-        return [data[s:s + win] for s in range(0, len(data) - win + 1, win)]
-
-
-if __name__ == "__main__":
-    CLASSES = ["A", "B", "C", "D"] 
-    METRICA = "KL_DIVERGENCE"
-    PASTA_RAIZ = "C:/Users/letic/iniciacao_cientifica/4classes"
-    PASTA_BASE_PROC = "C:/Users/letic/iniciacao_cientifica/processados"
-
-    print("--- PASSO 1: PROCESSANDO ÁUDIOS (GERANDO .NPY) ---")
-    df_completo = FourClasses.as_df()
-    df_completo['Target'] = df_completo['Class']
+def calcular_dissimilitude_cv(classe_i, classe_j, proc, comparator, metrica_alvo):
+    """
+    Calcula a média da métrica usando 5x2 Cross-Validation.
+    """
+    # Define se a comparação é da classe com ela mesma ou entre classes distintas
+    target_values = [classe_i] if classe_i == classe_j else [classe_i, classe_j]
     
-    dm = AudioDataModule(
-        file_loader=FourClasses.loader(data_base_dir=PASTA_RAIZ),
-        description_df=df_completo,
-        file_processor=TimeProcessor(lps_qty.Time.s(0.1), lps_qty.Frequency.hz(44100)),
-        processed_dir=PASTA_BASE_PROC
+    seletor = ml_sel.Selector(
+        target=ml_sel.LabelTarget(column="Class", values=target_values)
+    )
+
+    # Configuração do DataModule padrão do framework para 4 classes
+    dm = ml_db.FourClasses(
+        file_processor=proc,
+        data_dir=PASTA_RAIZ,
+        processed_dir=PASTA_PROC,
+        selection=seletor,
+        cv=ml_cv.FiveByTwo(), 
+        batch_size=128
     )
     
-    dm.prepare_data()
-    PASTA_REAL = dm.processed_dir
-    print(f"-> Processamento concluído. Pasta: {PASTA_REAL}")
+    dm.prepare_data() 
+    dm.setup()        
 
-    df_desc = pd.read_csv(os.path.join(PASTA_REAL, "description.csv"))
-    print(f"-> Total de fragmentos encontrados: {len(df_desc)}")
+    metricas_folds = []
 
+    # Loop pelos folds do Cross-Validation (5x2 = 10 iterações)
+    for fold_id in range(len(dm.folds)):
+        dm.set_fold(fold_id) 
+                
+        loader_1 = dm.train_dataloader()
+        loader_2 = dm.val_dataloader()
+        
+        # CORREÇÃO: Passando o membro do Enum em vez de String
+        res = comparator.comparar(loader_1, loader_2, metrica=metrica_alvo)
+        metricas_folds.append(res)
+        
+    return np.mean(metricas_folds)
+
+def main():
+    # Configurações de processamento (idênticas às que usamos na Parte 3)
+    proc = ml_procs.TimeProcessor(
+        fs_out=lps_qty.Frequency.khz(16), 
+        duration=lps_qty.Time.s(0.1), 
+        overlap=lps_qty.Time.s(0)
+    )
+    
     comparator = AudioComparator(n_bins=100)
+    
+    # Define qual métrica será usada para a matriz toda
+    metrica_projeto = Metrica.WASSERSTEIN
+
+    # Inicializa a matriz de resultados
     results = pd.DataFrame(index=CLASSES, columns=CLASSES)
 
-    print("\n--- PASSO 2: INICIANDO COMPARAÇÕES DA MATRIZ ---")
-    print("Aguarde, lendo arquivos do disco e calculando dissimilitude...")
-    print("-" * 50)
-
+    print(f" >>> Iniciando Cálculo da Matriz <<< ")
+    print(f"Configuração: 5x2 CV | Métrica: {metrica_projeto.name}")
+    
     for i in CLASSES:
         for j in CLASSES:
-            print(f"Calculando {i} vs {j}...", end=" ", flush=True)
+            print(f"Calculando {i} vs {j}...", flush=True)
             
-            if i == j:
-                # Comparação interna: Metade dos IDs vs Outra metade
-                ids_1 = df_completo[(df_completo['Class'] == i) & (df_completo['ID'].astype(int) % 2 != 0)]['ID'].tolist()
-                ids_2 = df_completo[(df_completo['Class'] == j) & (df_completo['ID'].astype(int) % 2 == 0)]['ID'].tolist()
-            else:
-                # Comparação entre classes diferentes
-                ids_1 = df_completo[df_completo['Class'] == i]['ID'].tolist()
-                ids_2 = df_completo[df_completo['Class'] == j]['ID'].tolist()
+            # Passando a métrica como parâmetro para a função
+            media = calcular_dissimilitude_cv(i, j, proc, comparator, metrica_projeto)
+            results.loc[i, j] = f"{media:.6f}"
+    
+    print("\n=== MATRIZ FINAL ===")
+    print(results)
+    
+    # Salva os resultados para abrir no Excel/Pandas depois
+    results.to_csv("matriz_final_cv.csv")
+    print("\nProcesso concluído! Arquivo 'matriz_final_cv.csv' gerado.")
 
-           
-            l1 = DataLoader(FragmentDataset(df_desc[df_desc['file_id'].isin(ids_1)], PASTA_REAL), batch_size=128)
-            l2 = DataLoader(FragmentDataset(df_desc[df_desc['file_id'].isin(ids_2)], PASTA_REAL), batch_size=128)
-
-            # Chama o método da Parte 1
-            try:
-                res = comparator.comparar(l1, l2, metrica=METRICA)
-                results.loc[i, j] = f"{res:.4f}"
-                print(f"OK! ({res:.4f})") 
-            except Exception as e:
-                print(f"ERRO: {e}")
-                results.loc[i, j] = "Erro"
-
-    print("-" * 50)
-    print("\n=== MATRIZ DE DISSIMILITUDE FINAL ===")
-    print(results)  
-   
+if __name__ == "__main__":
+    main()

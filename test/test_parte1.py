@@ -1,133 +1,93 @@
-import torch
+from enum import Enum
 import numpy as np
-import importlib
-import sys
-import os
+import sys 
+import torch
 
-
+# --- CONFIGURAÇÃO DE CAMINHO ---
 projeto_raiz = "C:/Users/letic/iniciacao_cientifica"
 if projeto_raiz not in sys.path:
     sys.path.append(projeto_raiz)
 
-from signal_processing.src.lps_sp.pdf import DissimilarityMeasure 
+from signal_processing.src.lps_sp.pdf import DissimilarityMeasure
+from ml.src.lps_ml.visualization.euclidian_mean_distance import euclidian_mean_distance
 
+
+class Metrica(Enum):
+    """
+    Enum com as metricas disponiveis para execução.
+    """
+    KL_DIVERGENCE = 0
+    WASSERSTEIN = 1
+    JENSEN_SHANNON = 2
+    EUCLIDIAN = 3
+
+    def executar(self, dados1, dados2, n_bins) -> float:
+
+        data1=dados1.flatten()
+        data2=dados2.flatten()
+
+        if self == Metrica.KL_DIVERGENCE:
+            return DissimilarityMeasure.KL_DIVERGENCE.from_data(data1, data2, n_bins = 100)
+
+        elif self == Metrica.WASSERSTEIN:
+            return DissimilarityMeasure.WASSERSTEIN.from_data(data1, data2, n_bins = 100)
+        
+        elif self == Metrica.JENSEN_SHANNON:
+            return DissimilarityMeasure.JENSEN_SHANNON.from_data(data1, data2, n_bins = 100)
+        
+        elif self == Metrica.EUCLIDIAN:
+            return euclidian_mean_distance(dados1, dados2)
+
+# --- CLASSE COMPARADORA ---
 class AudioComparator:
     def __init__(self, n_bins: int = 100):
-        """
-        Inicializa o comparador com a configuração de bins.
-        """
         self.n_bins = n_bins
-        self.metricas_pdf = ['KL_DIVERGENCE', 'WASSERSTEIN', 'JENSEN_SHANNON']
 
     def coletar_features(self, dataloader) -> np.ndarray:
-        """
-        Extrai os dados de um DataLoader e os organiza em um array NumPy.
-        """
         todas_features = []
         for feature, _ in dataloader:
-            if isinstance(feature, torch.Tensor):
-                features_np = feature.cpu().numpy()
-            else:
-                features_np = np.array(feature)
-            todas_features.append(features_np)
-            
-        if not todas_features:
-            return np.array([])
-        return np.concatenate(todas_features, axis=0)
+            f_np = feature.cpu().numpy() if isinstance(feature, torch.Tensor) else np.array(feature)
+            todas_features.append(f_np)
+        return np.concatenate(todas_features, axis=0) if todas_features else np.array([])
 
-    def comparar(self, dataloader1, dataloader2, metrica: str) -> float:
+    def comparar(self, dataloader1, dataloader2, metrica: Metrica) -> float:
         """
-        Calcula a dissimilitude entre dois loaders usando a métrica escolhida.
+        Calcula a dissimilitude usando o Enum Metrica.
         """
+        # Verificação de segurança para evitar o erro 'AttributeError'
+        if not isinstance(metrica, Metrica):
+            raise ValueError(f"O argumento 'metrica' deve ser um membro de Metrica(Enum), ex: Metrica.EUCLIDIAN. Recebeu: {type(metrica)}")
+
         dados1 = self.coletar_features(dataloader1)
         dados2 = self.coletar_features(dataloader2)
 
         if dados1.size == 0 or dados2.size == 0:
-            print("Aviso: Um dos loaders está vazio.")
             return 0.0
         
-        metrica_upper = metrica.upper()
+                
+        return metrica.executar(dados1, dados2, self.n_bins)
 
-        # 1. Métricas que usam a Distribuição de Probabilidade (PDF)
-        if metrica_upper in self.metricas_pdf:
-            metrica_pdf_func = DissimilarityMeasure[metrica_upper]
-            
-            # Achatamento para 1D necessário para cálculos de PDF
-            dados1_flat = dados1.flatten()
-            dados2_flat = dados2.flatten()
-
-            return metrica_pdf_func.from_data(
-                data1=dados1_flat, 
-                data2=dados2_flat, 
-                n_bins=self.n_bins
-            )
-        
-        # 2. Outras métricas (Importadas de arquivos externos)
-        else:
-            return self.executar_metrica_customizada(metrica, dados1, dados2)
-
-    def executar_metrica_customizada(self, metrica_nome: str, d1: np.ndarray, d2: np.ndarray) -> float:
-        """
-        Busca e executa uma função de métrica 
-        """
-        modulo_path = f"lps_ml.visualization.{metrica_nome}"
-        try:
-            metrica_modulo = importlib.import_module(modulo_path) 
-            funcao_metrica = getattr(metrica_modulo, metrica_nome) 
-            return funcao_metrica(d1, d2)
-        except Exception as e:
-            print(f"-> Métrica '{metrica_nome}' não encontrada. Usando fallback (Diferença de Médias).")
-            return float(np.abs(np.mean(d1) - np.mean(d2)))
-
-
-# Teste Simulado
+# --- TESTE DO SCRIPT ---
 if __name__ == "__main__":
-    import torch
+    # Simulação de dados
+    loader_a = [(torch.randn(5, 100), torch.zeros(5))]
+    loader_b = [(torch.randn(5, 100) + 0.5, torch.zeros(5))]
+
+    comparator = AudioComparator(n_bins=50)
+
+    print("Calculando métricas:")
     
-    print("=== SETUP: CRIANDO DADOS PARA TESTE ===")
-    
-    # Criamos 2 lotes (batches) com dados aleatórios (distribuição normal)
-    # Cada batch tem 5 fragmentos de 4410 amostras
-    lote_1 = (torch.randn(5, 4410), torch.zeros(5))
-    lote_2 = (torch.randn(5, 4410), torch.zeros(5))
-    
-    # Loader A e Loader B são idênticos (esperamos dissimilitude baixa/zero)
-    loader_a = [lote_1, lote_2]
-    loader_b = [lote_1, lote_2]
-    
-    # Loader C é muito diferente (multiplicado por 5 e somado 2)
-    lote_distorcido = (torch.randn(5, 4410) * 5 + 2, torch.zeros(5))
-    loader_c = [lote_distorcido, lote_distorcido]
+    # Forma correta de chamar:
+    dist_kl = comparator.comparar(loader_a, loader_b, metrica=Metrica.KL_DIVERGENCE)
+    dist_eu = comparator.comparar(loader_a, loader_b, metrica=Metrica.EUCLIDIAN)
 
-    
-    comparator = AudioComparator(n_bins=100)
+    print(f"-> KL Divergence: {dist_kl:.4f}")
+    print(f"-> Euclidian: {dist_eu:.4f}")
 
-    print("\n=== TESTE 1: COMPARANDO DADOS IGUAIS (A vs B) ===")
-    
-    # Chamando KL Divergence
-    res_kl = comparator.comparar(loader_a, loader_b, metrica="KL_DIVERGENCE")
-    print(f"-> KL Divergence: {res_kl:.4f}")
+    # Forma correta de chamar:
+    dist_kl = comparator.comparar(loader_a, loader_a, metrica=Metrica.KL_DIVERGENCE)
+    dist_eu = comparator.comparar(loader_b, loader_b, metrica=Metrica.EUCLIDIAN)
 
-    # Chamando Wasserstein
-    res_ws = comparator.comparar(loader_a, loader_b, metrica="WASSERSTEIN")
-    print(f"-> Wasserstein  : {res_ws:.4f}")
-
-    # Chamando euclidian
-    res_ws = comparator.comparar(loader_a, loader_b, metrica="euclidian_mean_distance")
-    print(f"-> Euclidian  : {res_ws:.4f}")
-
-    print("\n=== TESTE 2: COMPARANDO DADOS DIFERENTES (A vs C) ===")
-    
-    # Chamando KL Divergence para dados diferentes
-    res_kl_diff = comparator.comparar(loader_a, loader_c, metrica="KL_DIVERGENCE")
-    print(f"-> KL Divergence (Diferente): {res_kl_diff:.4f}")
-
-    # Chamando Wasserstein para dados diferentes
-    res_ws_diff = comparator.comparar(loader_a, loader_c, metrica="WASSERSTEIN")
-    print(f"-> Wasserstein  (Diferente): {res_ws_diff:.4f}")
-
-    # Chamando euclidian para dados diferentes
-    res_ws = comparator.comparar(loader_a, loader_c, metrica="euclidian_mean_distance")
-    print(f"-> Euclidian (Diferente)  : {res_ws:.4f}")
-
-    print("\n=== FIM DA DEMONSTRAÇÃO ===")
+    print('Loaders IGUAIS')
+    print(f"-> KL Divergence: {dist_kl:.4f}")
+    print(f"-> Euclidian: {dist_eu:.4f}")
