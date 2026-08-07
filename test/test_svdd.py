@@ -1,15 +1,24 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import os
+import re
+import sys
 import numpy as np
 import pandas as pd
-from torch.utils.data import DataLoader
+import torch
+import torch.nn as nn          
+import torch.optim as optim
+import matplotlib.pyplot as plt 
 
-# --- 1. MODELO DE EMBEDDING (BIAS=FALSE) ---
+# Imports da biblioteca do LabSonar:
+import lps_utils.quantities as lps_qty
+import lps_ml.core as ml_core
+import lps_ml.audio_processors as ml_procs
+import lps_ml.core.cv as ml_cv
+from lps_utils.utils import find_files
+
+# --- 1. MODELO DE EMBEDDING ---
 class EmbeddingNet(nn.Module):
     def __init__(self, input_dim=1600, n_saidas=32):
         super().__init__()
-        
         self.net = nn.Sequential(
             nn.Linear(input_dim, 128, bias=False),
             nn.ReLU(),
@@ -21,16 +30,12 @@ class EmbeddingNet(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-# --- 2. FUNÇÃO PARA CALCULAR O RAIO VIA QUANTIL ---
+# --- 2. CÁLCULO DO RAIO VIA QUANTIL ---
 def get_radius(dist: torch.Tensor, nu: float):
-    """
-    Resolve o raio R de forma otimizada via (1-nu)-quantile das distâncias.
-    Como dist é d^2, tiramos a raiz para ter a unidade linear do raio.
-    """
     sq_distances = np.sqrt(dist.clone().data.cpu().numpy())
     return np.quantile(sq_distances, 1 - nu)
 
-# --- 3. CLASSE PRINCIPAL DO ONE-CLASS DEEP SVDD ---
+# --- 3. TREINADOR DEEP SVDD ---
 class DeepSVDD_Trainer:
     def __init__(self, input_dim=1600, n_saidas=32, nu=0.1):
         self.nu = nu
@@ -38,16 +43,17 @@ class DeepSVDD_Trainer:
         self.n_saidas = n_saidas
         self.net = EmbeddingNet(input_dim, n_saidas)
         self.center = None
-        self.R = 0.0  # Raio inicial
+        self.R = 0.0
+        
+        self.historico_loss = []
+        self.historico_raio = []
 
     def init_center(self, loader):
-        """Estipula o centro pela média de uma passagem direta inicial (Regra do Repositorio)"""
         print("-> Inicializando centro fixo...")
         self.net.eval()
         all_z = []
         with torch.no_grad():
             for batch in loader:
-                # O AudioDataModule entrega (dados, label, id)
                 x = batch[0].view(batch[0].size(0), -1).float()
                 all_z.append(self.net(x))
         
@@ -55,7 +61,7 @@ class DeepSVDD_Trainer:
         self.center.requires_grad = False
         print(f"-> Centro definido em vetor de dimensão {self.n_saidas}")
 
-    def train(self, train_loader, epochs=20, lr=0.001):
+    def train(self, train_loader, epochs=50, lr=0.001):
         optimizer = optim.Adam(self.net.parameters(), lr=lr, weight_decay=1e-6)
         
         if self.center is None:
@@ -73,11 +79,8 @@ class DeepSVDD_Trainer:
                 optimizer.zero_grad()
                 
                 outputs = self.net(x)
-                # Distância Euclidiana ao quadrado até o centro fixo
                 dist = torch.sum((outputs - self.center) ** 2, dim=1)
                 
-                # Perda Soft-Boundary: R^2 + (1/nu) * mean(max(0, dist - R^2))
-                # Note: 'dist' aqui já é d^2
                 scores = dist - self.R**2
                 loss = self.R**2 + (1/self.nu) * torch.mean(torch.clamp(scores, min=0))
                 
@@ -87,43 +90,98 @@ class DeepSVDD_Trainer:
                 loss_acumulada += loss.item()
                 epoch_dists.append(dist)
 
-            
             all_dists = torch.cat(epoch_dists)
             self.R = get_radius(all_dists, self.nu)
             
-            print(f"Época {epoch+1}/{epochs} | Loss: {loss_acumulada/len(train_loader):.4f} | Raio R: {self.R:.4f}")
+            loss_final_epoca = loss_acumulada / len(train_loader)
+            self.historico_loss.append(loss_final_epoca)
+            self.historico_raio.append(self.R)
+            
+            print(f"Época {epoch+1}/{epochs} | Loss: {loss_final_epoca:.4f} | Raio R: {self.R:.4f}")
 
-    def test(self, test_loader):
-        """Retorna a distância média dos dados até o centro (score de anomalia)"""
-        self.net.eval()
-        scores = []
-        with torch.no_grad():
-            for batch in test_loader:
-                x = batch[0].view(batch[0].size(0), -1).float()
-                outputs = self.net(x)
-                dist = torch.sum((outputs - self.center) ** 2, dim=1)
-                scores.append(dist)
+    def plotar_treinamento(self):
+        epocas = range(1, len(self.historico_loss) + 1)
+        plt.figure(figsize=(12, 5))
         
-        # Dissimilaridade média
-        return torch.cat(scores).mean().item()
+        plt.subplot(1, 2, 1)
+        plt.plot(epocas, self.historico_loss, color='blue', linewidth=2, label='Loss SVDD')
+        plt.title('Evolução da Função de Perda (Loss)', fontsize=12, fontweight='bold')
+        plt.xlabel('Épocas')
+        plt.ylabel('Valor da Loss')
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.legend()
+        
+        plt.subplot(1, 2, 2)
+        plt.plot(epocas, self.historico_raio, color='red', linewidth=2, label='Raio R')
+        plt.title('Evolução do Raio da Hiperesfera (R)', fontsize=12, fontweight='bold')
+        plt.xlabel('Épocas')
+        plt.ylabel('Raio R')
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.legend()
+        
+        plt.tight_layout()
+        nome_grafico = 'curva_treinamento_deep_svdd.png'
+        plt.savefig(nome_grafico, dpi=300)
+        print(f"\n=> Gráficos salvos como: '{nome_grafico}'")
+        plt.show()
 
+# --- 4. PIPELINE DE ÁUDIO DO LABSONAR ---
+def extrair_id_como_int(caminho):
+    nome = os.path.basename(str(caminho))
+    nums = re.findall(r'\d+', nome)
+    return int("".join(nums)) if nums else 0
 
+def preparar_dataloader_real(caminho_da_pasta):
+    caminho = os.path.abspath(caminho_da_pasta)
+    arquivos = find_files(caminho, ".wav")
+    if not arquivos:
+        raise FileNotFoundError(f"Nenhum arquivo .wav encontrado em: {caminho}")
+
+    df_base = pd.DataFrame([{"ID": extrair_id_como_int(f), "Target": "classe"} for f in arquivos])
+    
+    proc = ml_procs.TimeProcessor(
+        fs_out=lps_qty.Frequency.hz(16000), 
+        duration=lps_qty.Time.s(0.1), overlap=lps_qty.Time.s(0)
+    )
+    
+    dm = ml_core.AudioDataModule(
+        file_loader=ml_core.AudioFileLoader(data_base_dir=caminho, extract_id=extrair_id_como_int),
+        file_processor=proc, 
+        description_df=df_base, 
+        processed_dir=os.path.abspath("./proc_dados_reais"), 
+        cv=ml_cv.FiveByTwo(), 
+        batch_size=128
+    )
+    dm.prepare_data()
+    dm.setup()
+    dm.set_fold(0)
+    return dm.train_dataloader()
+
+# --- 5. EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
+    print("=> Carregando dados reais usando o pipeline do LabSonar...")
     
-    print("Simulando fluxo com dados do LabSonar...")
-    
-    dados_treino = torch.randn(100, 1, 1600) 
-    labels = torch.zeros(100)
-    fake_loader = DataLoader(torch.utils.data.TensorDataset(dados_treino, labels), batch_size=20)
-
-    # 1. Instanciar
-    svdd = DeepSVDD_Trainer(input_dim=1600, nu=0.1)
-    
-    # 2. Treinar (Otimiza rede e atualiza R)
-    svdd.train(fake_loader, epochs=10)
-    
-    # 3. Testar (Métrica de comparação)
-    # Comparando a mesma classe, o score deve ser baixo.
-    # Comparando com a classe sintética, o score deve ser alto.
-    distancia_final = svdd.test(fake_loader)
-    print(f"\nDistância (Dissimilaridade) média: {distancia_final:.6f}")
+    # AJUSTE O CAMINHO ABAIXO PARA A PASTA QUE DESEJA TREINAR:
+    pasta_real = "C:/Users/marci/Documents/iniciacao_cientifica/cargo" 
+    try:
+        real_loader = preparar_dataloader_real(pasta_real)
+        print("=> Dataloader real criado com sucesso!")
+        
+        svdd = DeepSVDD_Trainer(input_dim=1600, n_saidas=32, nu=0.1)
+        
+        # Alterar a quantidade de épocas conforme necessário (ex: 10, 20, 50)
+        svdd.train(real_loader, epochs=10)
+        
+        svdd.plotar_treinamento()
+        
+        torch.save({
+            'model_state_dict': svdd.net.state_dict(),
+            'center': svdd.center,
+            'R': svdd.R,
+            'nu': svdd.nu
+        }, 'deep_svdd_real_checkpoint.pt')
+        
+        print("\n=> Sucesso! Treinamento concluído e checkpoint salvo.")
+        
+    except Exception as e:
+        print(f"\n[ERRO]: {e}")
